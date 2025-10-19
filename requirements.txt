@@ -1,0 +1,51 @@
+# Web Framework
+fastapi==0.119.0
+uvicorn[standard]==0.32.1
+pydantic==2.10.3
+pydantic-settings==2.6.1
+
+# Database
+psycopg2-binary==2.9.10
+sqlalchemy==2.0.36
+pgvector==0.3.6
+alembic==1.13.2
+
+# Task Queue
+celery==5.4.0
+redis==5.2.0
+
+# Web Scraping
+selenium==4.35.0
+beautifulsoup4==4.12.3
+webdriver-manager==4.0.2
+lxml==5.3.0
+
+# HTTP Client
+httpx==0.28.1
+requests==2.32.3
+
+# Environment & Configuration
+python-dotenv==1.0.1
+
+# Date & Time
+pytz==2024.2
+
+# Data Processing
+numpy==2.2.0
+pandas==2.2.3
+
+# Logging
+python-json-logger==3.2.1
+
+# Testing (optional)
+pytest==8.3.4
+pytest-asyncio==0.24.0
+pytest-cov==6.0.0
+
+# Code Quality (optional)
+black==24.10.0
+flake8==7.1.1
+mypy==1.13.0
+
+# CORS
+python-multipart==0.0.18

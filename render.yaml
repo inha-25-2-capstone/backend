@@ -1,0 +1,154 @@
+services:
+  # FastAPI Web Service
+  - type: web
+    name: politics-news-api
+    env: python
+    region: singapore
+    plan: starter
+    buildCommand: pip install -r requirements.txt && python scripts/migrate.py up
+    startCommand: uvicorn src.api.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: PYTHONUNBUFFERED
+        value: 1
+      - key: LOG_LEVEL
+        value: INFO
+      - key: DATABASE_URL
+        fromDatabase:
+          name: politics-news-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: politics-news-redis
+          type: redis
+          property: connectionString
+      - key: AI_SERVICE_URL
+        sync: false
+      - key: AI_SERVICE_TIMEOUT
+        value: 30
+      - key: AI_SERVICE_BATCH_SIZE
+        value: 50
+      - key: CORS_ORIGINS
+        sync: false
+      - key: API_PREFIX
+        value: /api/v1
+
+  # Celery Background Worker
+  - type: worker
+    name: politics-news-worker
+    env: python
+    region: singapore
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: celery -A src.workers.celery_app worker --loglevel=info
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: PYTHONUNBUFFERED
+        value: 1
+      - key: LOG_LEVEL
+        value: INFO
+      - key: DATABASE_URL
+        fromDatabase:
+          name: politics-news-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: politics-news-redis
+          type: redis
+          property: connectionString
+      - key: CELERY_BROKER_URL
+        fromService:
+          name: politics-news-redis
+          type: redis
+          property: connectionString
+      - key: CELERY_RESULT_BACKEND
+        fromService:
+          name: politics-news-redis
+          type: redis
+          property: connectionString
+      - key: AI_SERVICE_URL
+        sync: false
+      - key: AI_SERVICE_TIMEOUT
+        value: 30
+      - key: AI_SERVICE_BATCH_SIZE
+        value: 50
+
+  # Cron Job: Daily News Scraper (5:00 AM KST = 8:00 PM UTC)
+  - type: cron
+    name: politics-news-scraper
+    env: python
+    region: singapore
+    schedule: "0 20 * * *"
+    buildCommand: pip install -r requirements.txt
+    startCommand: python scripts/run_scraper.py
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: PYTHONUNBUFFERED
+        value: 1
+      - key: LOG_LEVEL
+        value: INFO
+      - key: DATABASE_URL
+        fromDatabase:
+          name: politics-news-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: politics-news-redis
+          type: redis
+          property: connectionString
+      - key: SCRAPER_DELAY
+        value: 2
+      - key: SCRAPER_MAX_ARTICLES
+        value: 1000
+      - key: SCRAPER_HEADLESS
+        value: true
+      - key: TIMEZONE
+        value: Asia/Seoul
+
+  # Cron Job: Topic Clustering (runs after summarization)
+  - type: cron
+    name: politics-news-clustering
+    env: python
+    region: singapore
+    schedule: "0 23 * * *"
+    buildCommand: pip install -r requirements.txt
+    startCommand: python scripts/run_clustering.py
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: PYTHONUNBUFFERED
+        value: 1
+      - key: LOG_LEVEL
+        value: INFO
+      - key: DATABASE_URL
+        fromDatabase:
+          name: politics-news-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: politics-news-redis
+          type: redis
+          property: connectionString
+      - key: CLUSTERING_TOP_N
+        value: 7
+      - key: CLUSTERING_MIN_SIMILARITY
+        value: 0.3
+      - key: RECOMMENDATION_PER_STANCE
+        value: 3
+
+databases:
+  # PostgreSQL Database with pgvector
+  - name: politics-news-db
+    databaseName: politics_news
+    region: singapore
+    plan: starter
+    postgresMajorVersion: 16
+    # Note: pgvector extension is automatically enabled by Alembic migration
+
+# Redis for Celery and Task Queue
+# Note: Redis needs to be created separately in Render Dashboard
+# Then reference it using fromService in envVars above
