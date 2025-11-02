@@ -1,672 +1,441 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code when working with code in this repository.
+Backend development guide for Political News Aggregation System.
 
 ## Project Overview
 
-**Political News Aggregation and Analysis Backend** - A hybrid cloud architecture system that scrapes Korean political news from Naver News, performs AI-powered summarization and stance analysis (옹호/중립/비판), clusters articles by topic, and provides multi-perspective recommendations.
+**Political News Aggregation and Analysis Backend** - Scrapes Korean political news, performs AI-powered summarization and embedding generation, clusters by topic with incremental assignment, and provides multi-perspective recommendations (옹호/중립/비판).
 
-The system uses **Render** for web application hosting and a **separate AI service** (deployed on Hugging Face Spaces or similar) for AI processing, connected via asynchronous task queues for efficient batch operations.
+**Architecture**: Hybrid cloud - Render (backend) + HF Spaces (AI service) + Redis (task queue)
 
-## Team Structure
-
-- **Backend Developer**: FastAPI, Celery, PostgreSQL, Redis, scraper, deployment
-- **Frontend Developer**: React application (separate repository)
-- **ML Engineer**: Fine-tuning stance analysis model in Colab
+**Current Status (2025-10-22)**:
+- ✅ 243 articles collected (5 press sources, excluding Yonhap for testing)
+- ✅ 227 articles processed with AI (93% success rate)
+- ✅ 7 topics clustered for 2025-10-20
+- ✅ Hierarchical clustering (5-10 topics auto) + Centroid-based incremental assignment ⭐
+- ✅ 30분 파이프라인 (Scraping → AI → Incremental) ⭐
+- ✅ 2시간 리클러스터링 (Hierarchical) ⭐
+- ⏳ FastAPI endpoints (next priority)
 
 ## Technology Stack
 
-### Render Platform (Web Application Hosting)
-- **Web Service**: FastAPI backend API server
-- **PostgreSQL**: Database with pgvector extension (Singapore region)
-- **Background Worker**: Celery workers for batch processing
-- **Cron Jobs**: Scheduled tasks for scraping and clustering
-- **Redis**: Task queue for async job management
-
-### AI Service (Separate Repository/Deployment)
-- **Deployment**: Hugging Face Spaces (or alternative)
-- **FastAPI Server**: Independent AI microservice
-- **Batch Summarization API**: Article summarization endpoint
-- **Batch Stance Analysis API**: Topic-based stance detection endpoint (using fine-tuned model)
-
-### Development Stack
-- **Python 3.12** with virtual environment
-- **Web Scraping**: Selenium 4.35.0 (headless Chrome) + BeautifulSoup4
-- **Task Queue**: Celery + Redis
-- **API Framework**: FastAPI 0.119.0
-- **Database**: PostgreSQL 16 + pgvector extension
+- **Backend**: FastAPI 0.119.0, Celery, PostgreSQL 16 + pgvector, Redis
+- **AI Service**: Deployed on HF Spaces (https://zedwrkc-news-stance-detection.hf.space)
+- **Scraping**: Selenium 4.35.0 + BeautifulSoup4
+- **Clustering**: scikit-learn (Hierarchical, K-Means, DBSCAN), NumPy (cosine similarity)
 - **Database Migrations**: Alembic 1.13.2
-- **Configuration**: python-dotenv for environment management
-- **Docker**: Docker Compose for local development
+- **Python**: 3.12
 
 ## Project Structure
 
 ```
 backend/
 ├── src/
-│   ├── api/                      # FastAPI application
-│   │   ├── main.py               # Main FastAPI app
-│   │   ├── routes/               # API endpoints
-│   │   │   ├── topics.py
-│   │   │   ├── articles.py
-│   │   │   └── health.py
-│   │   └── schemas/              # Pydantic models
-│   │       └── responses.py
-│   │
-│   ├── scrapers/                 # Web scraping
-│   │   └── scraper.py            # Naver News scraper
-│   │
-│   ├── workers/                  # Celery tasks
-│   │   ├── celery_app.py         # Celery configuration
-│   │   ├── tasks.py              # Celery tasks
-│   │   └── config.py             # Worker settings
-│   │
-│   ├── services/                 # Business logic
-│   │   ├── clustering.py         # Topic clustering
-│   │   ├── recommendation.py     # Recommendation engine
-│   │   └── ai_client.py          # AI service API client
-│   │
-│   ├── models/                   # Database models
-│   │   └── database.py           # DB connection & ORM
-│   │
-│   ├── utils/                    # Utilities
-│   │   └── logger.py             # Logging configuration
-│   │
-│   └── config.py                 # Environment configuration
-│
+│   ├── api/                      # FastAPI application (TODO)
+│   ├── scrapers/                 # Naver News scraper ✅
+│   │   └── scraper.py
+│   ├── workers/                  # Celery tasks ✅
+│   │   ├── celery_app.py
+│   │   └── tasks.py
+│   ├── services/                 # Business logic ✅
+│   │   ├── ai_client.py          # AI service client + HF Spaces warmup
+│   │   ├── clustering.py         # Hierarchical/K-Means/DBSCAN + centroid storage ⭐
+│   │   └── incremental_assignment.py  # Real-time article assignment
+│   ├── models/                   # Database layer ✅
+│   │   └── database.py
+│   └── utils/
+│       └── logger.py
 ├── database/
-│   ├── postgre_schema.sql        # Database schema (reference)
-│   └── migrations/               # Alembic migrations
-│       ├── env.py                # Migration environment config
-│       ├── script.py.mako        # Migration template
-│       └── versions/             # Migration version files
-│
-├── scripts/                      # Executable scripts
-│   ├── run_scraper.py            # Scraper entry point
-│   ├── run_clustering.py         # Clustering entry point
+│   ├── postgre_schema.sql
+│   └── migrations/               # Alembic migrations ✅
+│       └── versions/
+│           ├── 1fdac3e26595_initial_schema.py
+│           ├── 50f79b54aace_add_embedding_column.py
+│           └── 6659f7177381_add_centroid_pending.py
+├── scripts/
+│   ├── run_scraper_with_pipeline.py  # 30분 pipeline (scraping+AI+incremental) ⭐
+│   ├── run_scraper.py            # News collection only
+│   ├── run_clustering.py         # Topic clustering (hierarchical) ⭐
+│   ├── incremental_assign.py     # Incremental assignment
+│   ├── process_all_articles.py   # Batch AI processing (excludes Yonhap)
 │   ├── init_db.py                # Database initialization
-│   └── migrate.py                # Migration helper script
-│
-├── data/                         # Local test data (git ignored)
-├── logs/                         # Log files (git ignored)
-├── tests/                        # Test suite
-│
-├── .env                          # Local environment variables (git ignored)
-├── .env.example                  # Environment variable template
-├── .gitignore                    # Git ignore rules
-├── requirements.txt              # Python dependencies
-├── alembic.ini                   # Alembic configuration
-├── Dockerfile                    # Production Docker image
-├── docker-compose.yml            # Local development environment
-├── render.yaml                   # Render deployment configuration
-├── CLAUDE.md                     # This file
-└── README.md                     # Project documentation
+│   └── migrate.py                # Migration management
+├── test_ai_pipeline.py           # Pipeline test ✅
+├── requirements.txt
+├── alembic.ini
+├── docker-compose.yml            # Local development (PostgreSQL + Redis)
+└── render.yaml                   # Deployment config
 ```
 
-## Development Setup
+## Database Schema (Key Tables)
 
-### Prerequisites
-- Python 3.12
-- Docker and Docker Compose
-- Git
-
-### Initial Setup
-
-```bash
-# 1. Clone repository
-cd /home/zedwrkc/backend
-
-# 2. Create virtual environment
-python3.12 -m venv venv
-source venv/bin/activate  # Linux/Mac
-
-# 3. Install dependencies
-pip install -r requirements.txt
-
-# 4. Configure environment variables
-cp .env.example .env
-# Edit .env with your local settings
-# IMPORTANT: Add this line to .env for local development:
-echo 'DATABASE_URL=postgresql://postgres:postgres@localhost:5432/politics_news_dev' >> .env
-
-# 5. Start Docker services (PostgreSQL + Redis)
-docker compose up -d  # Note: 'docker compose' not 'docker-compose'
-
-# 6. Initialize database with Alembic migrations
-python scripts/init_db.py
-
-# 7. Verify setup
-docker compose ps  # Check services are running
-python scripts/migrate.py current  # Check migration status
-```
-
-### Important Notes for Local Development
-
-1. **Environment Variables:**
-   - If you have system-level `DATABASE_URL` set (e.g., from Render), unset it for local development:
-     ```bash
-     unset DATABASE_URL
-     ```
-   - Or ensure `.env` file has the local DATABASE_URL which will override system env
-
-2. **Running Scraper:**
-   ```bash
-   # Make sure to unset DATABASE_URL if it points to production
-   unset DATABASE_URL
-   source venv/bin/activate
-   python scripts/run_scraper.py
-   ```
-
-3. **Docker Commands:**
-   - Use `docker compose` (without hyphen) for modern Docker installations
-   - If `docker-compose` command not found, use `docker compose` instead
-
-### Development Workflow
-
-```bash
-# Terminal 1: Start FastAPI backend
-source venv/bin/activate
-uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8000
-
-# Terminal 2: Start Celery worker
-source venv/bin/activate
-celery -A src.workers.celery_app worker --loglevel=info
-
-# Terminal 3: Run scraper manually (for testing)
-source venv/bin/activate
-python scripts/run_scraper.py
-
-# Terminal 4: Run clustering manually (for testing)
-source venv/bin/activate
-python scripts/run_clustering.py
-```
-
-### Docker Commands
-
-```bash
-# Start services
-docker-compose up -d
-
-# Stop services
-docker-compose down
-
-# View logs
-docker-compose logs -f postgres
-docker-compose logs -f redis
-
-# Reset database (WARNING: destroys all data)
-docker-compose down -v
-docker-compose up -d
-```
-
-## Database Architecture
-
-The schema (`database/postgre_schema.sql`) implements a normalized 6-table design:
-
-### Core Tables
-
-1. **press** - News organizations
-2. **article** - Full article content with metadata
-   - `news_date`: Calculated daily news cycle (KST 5:00 cutoff)
+1. **press** - 6 news organizations (currently using 5, excluding Yonhap for testing)
+2. **article** - Full content + summary + embedding(768-dim vector)
+   - 243 articles total
+   - 227 with AI processing completed
 3. **topic** - Daily top 7 trending topics
-   - `main_article_id`: Representative article
-   - `main_stance`: Stance of representative article
-   - `topic_rank`: Daily ranking (1-7)
-4. **topic_article_mapping** - Many-to-many relationship
-   - `similarity_score`: Cosine similarity for clustering
-5. **stance_analysis** - Sentiment classification
-   - `stance_label`: 옹호/중립/비판
-   - `stance_score`: Range [-1, 1]
-6. **recommended_article** - Top 3 articles per stance per topic
+   - Includes centroid_embedding for incremental assignment
+   - 7 topics for 2025-10-20
+4. **topic_article_mapping** - Many-to-many with similarity_score
+5. **pending_articles** - Articles below similarity threshold
+6. **stance_analysis** - 옹호/중립/비판 classification (TODO)
+7. **recommended_article** - Top 3 per stance per topic (TODO)
 
-### Key Features
-- **pgvector extension**: For embeddings and similarity search
-- **Triggers**: Auto-update article counts
-- **Indexes**: Optimized for date-range and stance queries
+**Key Features:**
+- pgvector extension for embedding storage
+- IVFFlat index for cosine similarity search
+- KST timezone (5:00 AM news cycle cutoff)
 
-### Database Migrations with Alembic
+## Data Pipeline
 
-The project uses **Alembic** for database schema version control and migrations.
-
-**Benefits:**
-- Version-controlled schema changes tracked in Git
-- Safe schema updates across environments (local/staging/production)
-- Rollback capability for failed migrations
-- Automatic migration on Render deployment
-- Team collaboration without schema conflicts
-
-**Migration Files:**
-- `alembic.ini` - Alembic configuration
-- `database/migrations/env.py` - Environment setup (reads .env)
-- `database/migrations/versions/` - Migration version files
-- `scripts/migrate.py` - Helper script for common operations
-- `scripts/init_db.py` - Database initialization + seeding
-
-**Common Operations:**
-```bash
-# Apply all pending migrations
-python scripts/migrate.py up
-
-# Create a new migration after schema changes
-alembic revision -m "add_column_xyz"
-
-# Show current database version
-python scripts/migrate.py current
-
-# View migration history
-python scripts/migrate.py history
-
-# Rollback one migration
-python scripts/migrate.py down
-
-# Reset database (WARNING: drops all tables)
-python scripts/migrate.py reset
-```
-
-**Deployment:**
-- Migrations run automatically on Render during build
-- `buildCommand` in render.yaml: `pip install -r requirements.txt && python scripts/migrate.py up`
-- pgvector extension is automatically enabled by initial migration
-
-## Data Pipeline Flow
+**Status**: Phase 1-3.5 Complete ✅ | Phase 4-5 TODO
 
 ```
-Phase 1: News Collection (Render Cron - Daily 5:00 AM KST)
-→ Naver News → Selenium Scraper → PostgreSQL
-→ Enqueue article_ids to Redis
+30분 주기: 스크래핑 + 파이프라인 ⭐
+Phase 1: News Collection
+Naver News → Selenium Scraper → PostgreSQL (article table)
+            ↓
+Phase 2: Celery Chain Trigger (Automatic)
+   ├─> AI Processing (Celery Worker)
+   │   ├─ POST /batch-process-articles to AI Service (HF Spaces)
+   │   ├─ Input: {article_id, content}
+   │   ├─ Output: {summary, embedding(768-dim), stance(optional)}
+   │   ├─ Warmup: HF Spaces cold start handling (60s timeout)
+   │   ├─ Batch size: 5 articles (configurable)
+   │   └─ Save to DB: UPDATE article SET summary, embedding
+   │
+   └─> Incremental Assignment (Automatic)
+       ├─ Compare with topic centroids
+       ├─ Similarity threshold: 0.5
+       ├─ Centroid update weight: 0.1
+       └─ O(n) complexity vs O(n²) re-clustering
 
-Phase 2: Batch Summarization (Celery Worker → AI Service)
-→ Redis Queue → Celery Worker (batch 50-100)
-→ Fetch articles from DB
-→ POST /batch-summarize to AI Service
-→ Save summaries to DB
+2시간 주기: Full Re-Clustering ⭐
+Phase 3: Hierarchical Clustering
+Use stored embeddings → Hierarchical (distance_threshold=0.5)
+  ├─ Auto-range: 5-10 topics
+  ├─ Save top 7 topics
+  ├─ Centroid embedding storage
+  ├─ Representative article selection
+  └─ Silhouette score evaluation
 
-Phase 3: Topic Clustering (Render Cron)
-→ Generate embeddings from summaries (pgvector)
-→ Cosine similarity clustering
-→ Select top 7 topics with representative articles
-→ Update topic tables
-→ Enqueue (article_id, topic_id) pairs
+Phase 4: Stance Analysis (TODO - when model ready)
+Summary → Stance model → 옹호/중립/비판
 
-Phase 4: Batch Stance Analysis (Celery Worker → AI Service)
-→ Redis Queue → Celery Worker
-→ POST /batch-analyze-stance to AI Service
-→ Save stance results to DB
-
-Phase 5: Recommendation & API
-→ Recommendation engine selects top 3 per stance
-→ FastAPI serves data to frontend
+Phase 5: API & Recommendations (TODO)
+FastAPI endpoints → Frontend
 ```
+
+## AI Service Integration
+
+**Deployed URL**: https://zedwrkc-news-stance-detection.hf.space
+
+**Key Endpoint**: `POST /batch-process-articles`
+- Input: List of {article_id, content}
+- Output: {summary, embedding(768-dim), stance(optional)}
+- Batch size: Up to 50 articles (currently using 5 for testing)
+- Timeout: 120 seconds
+- **Warmup**: Automatic HF Spaces cold start handling (60s timeout, 3 retries)
+
+**Improvements Made**:
+- ✅ Warmup logic for HF Spaces cold start
+- ✅ Automatic retry with exponential backoff
+- ✅ Session persistence for multiple batches
+- ✅ Configurable batch sizes
+
+**Documentation**: https://zedwrkc-news-stance-detection.hf.space/docs
 
 ## Environment Configuration
 
-### Local Development (.env)
-```
+### Local (.env)
+```bash
 DB_HOST=localhost
 DB_PORT=5432
 DB_NAME=politics_news_dev
 DB_USER=postgres
 DB_PASSWORD=postgres
+
 REDIS_URL=redis://localhost:6379/0
-AI_SERVICE_URL=http://localhost:8001  # or HF Spaces URL
+
+AI_SERVICE_URL=https://zedwrkc-news-stance-detection.hf.space
+AI_SERVICE_TIMEOUT=120
+
+# Clustering (Hierarchical) ⭐
+CLUSTERING_ALGORITHM=hierarchical
+CLUSTERING_DISTANCE_THRESHOLD=0.5
+CLUSTERING_MIN_TOPICS=5
+CLUSTERING_MAX_TOPICS=10
+CLUSTERING_TOP_N=7
+
+# Incremental Assignment
+INCREMENTAL_SIMILARITY_THRESHOLD=0.5
+INCREMENTAL_CENTROID_UPDATE_WEIGHT=0.1
 ```
 
 ### Production (Render Dashboard)
-```
-DATABASE_URL=<auto-injected by Render>
-REDIS_URL=<auto-injected by Render>
-AI_SERVICE_URL=https://your-space.hf.space
-```
+```bash
+DATABASE_URL=<auto-injected>
+REDIS_URL=<auto-injected>
+AI_SERVICE_URL=https://zedwrkc-news-stance-detection.hf.space
+AI_SERVICE_TIMEOUT=120
 
-## API Endpoints (To Be Implemented)
+# Clustering (Hierarchical) ⭐
+CLUSTERING_ALGORITHM=hierarchical
+CLUSTERING_DISTANCE_THRESHOLD=0.5
+CLUSTERING_MIN_TOPICS=5
+CLUSTERING_MAX_TOPICS=10
+CLUSTERING_TOP_N=7
 
-```
-GET  /health                                    # Health check
-GET  /api/v1/topics?date=YYYY-MM-DD            # Daily top 7 topics
-GET  /api/v1/topics/{topic_id}/articles        # Articles by topic (grouped by stance)
-GET  /api/v1/topics/{topic_id}/recommendations # Top 3 per stance (9 total)
-```
-
-## AI Service Integration
-
-### Expected AI Service Endpoints
-
-**POST /batch-summarize**
-```json
-Request: {
-  "articles": [
-    {"article_id": 1, "content": "..."},
-    {"article_id": 2, "content": "..."}
-  ]
-}
-Response: {
-  "summaries": [
-    {"article_id": 1, "summary": "..."},
-    {"article_id": 2, "summary": "..."}
-  ]
-}
+# Incremental Assignment
+INCREMENTAL_SIMILARITY_THRESHOLD=0.5
+INCREMENTAL_CENTROID_UPDATE_WEIGHT=0.1
 ```
 
-**POST /batch-analyze-stance**
-```json
-Request: {
-  "items": [
-    {"article_id": 1, "topic": "...", "summary": "..."},
-    {"article_id": 2, "topic": "...", "summary": "..."}
-  ]
-}
-Response: {
-  "results": [
-    {
-      "article_id": 1,
-      "stance_label": "옹호",
-      "prob_positive": 0.7,
-      "prob_neutral": 0.2,
-      "prob_negative": 0.1
-    }
-  ]
-}
-```
-
-## Deployment to Render
-
-### Prerequisites
-1. Render account
-2. GitHub repository connected
-3. Redis instance created in Render Dashboard
-4. AI service deployed and URL configured
-
-### Deployment Steps
+## Local Development Quick Start
 
 ```bash
-# 1. Push code to GitHub
-git add .
-git commit -m "Initial backend setup"
-git push origin main
+# 1. Setup
+cd backend
+python3.12 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env  # Edit with local settings
 
-# 2. In Render Dashboard:
-#    - New → Blueprint
-#    - Connect to GitHub repository
-#    - Render will read render.yaml
-#    - Configure environment variables (AI_SERVICE_URL, CORS_ORIGINS)
-#    - Deploy
+# 2. Start services
+docker compose up -d  # PostgreSQL + Redis
 
-# 3. Enable pgvector extension:
-#    - Go to PostgreSQL instance
-#    - Connect tab → Run SQL
-#    - CREATE EXTENSION IF NOT EXISTS vector;
+# 3. Initialize database
+python scripts/init_db.py
 
-# 4. Initialize database schema:
-#    - Run init_db.py as a one-time job
-#    - Or manually run postgre_schema.sql via psql
+# 4. Start Celery worker (in separate terminal)
+celery -A src.workers.celery_app worker --loglevel=info
+
+# 5. Run 30분 pipeline (recommended) ⭐
+python scripts/run_scraper_with_pipeline.py
+
+# OR run components manually:
+
+# 6a. Run scraper only
+python scripts/run_scraper.py
+
+# 6b. Process articles with AI
+python scripts/process_all_articles.py  # Excludes Yonhap
+
+# 6c. Run clustering (hierarchical) ⭐
+python scripts/run_clustering.py 2025-10-20 hierarchical
+
+# 6d. Run incremental assignment
+python scripts/incremental_assign.py --date 2025-10-20
+
+# 7. Test pipeline
+python test_ai_pipeline.py
 ```
 
-## Common Commands
+## Database Migrations
 
 ```bash
-# Run tests
-pytest tests/
+# Apply migrations
+python scripts/migrate.py up
 
-# Code formatting
-black src/
+# Create new migration
+alembic revision -m "description"
 
-# Linting
-flake8 src/
+# Check current version
+python scripts/migrate.py current
 
-# Type checking
-mypy src/
-
-# Database migrations
-python scripts/migrate.py up              # Run all pending migrations
-python scripts/migrate.py down            # Downgrade one revision
-python scripts/migrate.py current         # Show current revision
-python scripts/migrate.py history         # Show migration history
-python scripts/migrate.py reset           # Reset database (WARNING: drops all tables)
-
-# Create new migration (after schema changes)
-alembic revision -m "description_of_change"
-
-# Initialize fresh database
-python scripts/init_db.py                 # Run migrations and seed data
-python scripts/init_db.py --reset         # Drop all tables and reinitialize
+# Rollback one version
+python scripts/migrate.py down
 ```
+
+## Current Test Data
+
+**Articles (243 total)**:
+- YTN (052): 99 articles
+- SBS (020): 47 articles
+- 경향신문 (032): 47 articles
+- 한겨레 (028): 27 articles
+- 조선일보 (023): 23 articles
+- ~~연합뉴스 (001)~~: Excluded for testing
+
+**Topics (7 for 2025-10-20)**:
+1. 국정감사 '김현지 공방' (104 articles)
+2. 재판소원 당론 추진 (66 articles)
+3. 주택시장 안정 (56 articles)
+4. 캄보디아 감금 사건 (56 articles)
+5. 윤 대통령 면회 논란 (52 articles)
+6. 방산·항공우주 투자 (46 articles)
+7. 남북한 통일 여론조사 (20 articles)
+
+**AI Processing**:
+- Success rate: 93% (227/243)
+- Failed: 16 articles (AI model "index out of range" errors)
+- Average processing time: 30-50s per batch (5 articles)
 
 ## Important Notes
 
-### Security
-- `.env` file is git-ignored
-- Never commit credentials
-- Use Render environment variables for production
-
-### Performance
-- Batch size: 50-100 articles per API call
-- Redis queue prevents blocking operations
-- pgvector for fast similarity search
-- Denormalized `recommended_article` table for fast reads
-
-### Development Guidelines
-1. Always activate virtual environment before working
-2. Keep Docker services running during development
-3. Test with small datasets first
-4. Use comprehensive logging
-5. Handle partial failures in batch processing
-6. Ensure idempotency in Celery tasks
-
 ### Three-Stance System
-All articles are classified as:
 - **옹호** (Support/Positive)
 - **중립** (Neutral)
 - **비판** (Criticism/Negative)
 
 ### Daily News Cycle
 - Uses KST 5:00 AM cutoff for `news_date`
-- Scraper runs daily at 5:00 AM KST (Render Cron)
-- Clustering runs after summarization completes
+- Articles published before 5 AM belong to previous day's cycle
+
+### Scraper
+- 6 press companies configured: 연합뉴스, SBS, 조선일보, 한겨레, 경향신문, YTN
+- Currently excluding Yonhap (press_id='001') for testing
+- Content validation: Min 20 characters
+- Duplicate checking by URL
+- Auto-enqueues AI processing tasks
+
+### AI Processing
+- Celery task: `process_articles_batch(article_ids)`
+- Retry logic: Max 3 retries with exponential backoff
+- Task timeout: 10 minutes
+- Batch size: 5 articles (configurable via scripts/process_all_articles.py)
+- HF Spaces warmup: Automatic cold start handling
+- Stance field: Currently `null` (model not ready)
+
+### Clustering ⭐
+- Algorithm: Hierarchical (default), K-Means, DBSCAN
+- Distance threshold: 0.5 (auto-adjusts 5-10 topics)
+- Saved topics: Top 7
+- Quality metric: Silhouette score
+- Centroid storage: For incremental assignment
+- Re-clustering: Every 2 hours (Render Cron)
+
+### Incremental Assignment
+- Frequency: Every 30 minutes (part of scraping pipeline) ⭐
+- Similarity threshold: 0.5 (cosine similarity)
+- Centroid update: Exponential moving average (weight=0.1)
+- Pending articles: Below threshold, wait for re-clustering
+
+### 30분 Pipeline ⭐
+- Scraping → AI Processing → Incremental Assignment (Celery Chain)
+- Batch size: 5 articles
+- Fully automated via Render Cron
 
 ## Current Implementation Status
 
-### ✅ Completed
+### ✅ Phase 1: News Collection - COMPLETED
+- Naver News scraper with 6 press companies (5 active for testing)
+- Database integration with duplicate checking
+- KST timezone handling
+- Auto-enqueue AI processing tasks
 
-#### Infrastructure & Setup (2025-10-17)
-- Project structure and file organization
-- Docker Compose setup (PostgreSQL + Redis)
-- Database schema with pgvector extension
-- Environment configuration (.env setup)
-- Render deployment configuration (render.yaml)
-- Git repository setup
-- Python dependencies installation (requirements.txt)
+**Files**: `src/scrapers/scraper.py`, `scripts/run_scraper.py`
 
-#### Database Migration System - COMPLETED ✅ (2025-10-18)
-**Files Created/Modified:**
-- `alembic.ini` - Alembic configuration
-- `database/migrations/env.py` - Migration environment setup
-- `database/migrations/versions/1fdac3e26595_initial_schema.py` - Initial migration
-- `scripts/migrate.py` - Migration helper script
-- `scripts/init_db.py` - Enhanced database initialization script
-- `requirements.txt` - Added alembic==1.13.2
-- `render.yaml` - Added auto-migration to buildCommand
+### ✅ Phase 2: Backend-AI Integration - COMPLETED
+- AI Service HTTP client with retry logic
+- HF Spaces cold start handling (warmup)
+- Celery task for batch AI processing
+- Database migration: embedding column (vector 768)
+- Batch size: 5 articles (excludes Yonhap)
+- Success rate: 93%
 
-**Features Implemented:**
-1. **Alembic Integration**
-   - ✅ Alembic initialized with proper configuration
-   - ✅ Environment-aware database URL (reads from .env or DATABASE_URL)
-   - ✅ Initial migration created from existing schema
-   - ✅ Support for both local and production environments
+**Files**:
+- `src/services/ai_client.py` (with warmup logic)
+- `src/workers/tasks.py`
+- `scripts/process_all_articles.py` (Yonhap exclusion)
 
-2. **Migration Scripts**
-   - ✅ `scripts/migrate.py` - User-friendly migration commands
-   - ✅ `scripts/init_db.py` - Complete database setup (migrations + seeding)
-   - ✅ Database verification and health checks
-   - ✅ Safe reset functionality with confirmation
+### ✅ Phase 3: Topic Clustering - COMPLETED ⭐
+- **Hierarchical clustering** (default) with cosine similarity
+- Distance threshold 0.5, auto-range 5-10 topics
+- K-Means and DBSCAN also supported (configurable)
+- Representative article selection (closest to centroid)
+- Silhouette score evaluation
+- Celery task for automated clustering
+- Top 7 topics saved
+- **Centroid storage** for incremental assignment
 
-3. **Automated Deployment**
-   - ✅ Migrations run automatically on Render build
-   - ✅ pgvector extension automatically enabled
-   - ✅ No manual SQL execution needed
+**Files**:
+- `src/services/clustering.py`
+- `scripts/run_clustering.py`
 
-4. **Benefits Achieved:**
-   - ✅ Version-controlled schema changes
-   - ✅ Rollback capability for failed migrations
-   - ✅ Team collaboration without conflicts
-   - ✅ Consistent schema across all environments
+**Test Results**:
+- 200 articles → 7 topics
+- Silhouette score: 0.178
+- Largest topic: 104 articles
+- Smallest topic: 20 articles
 
-#### Phase 1: News Collection - COMPLETED ✅
-**Files Created/Modified:**
-- `src/models/database.py` - Database models and repositories
-- `src/utils/logger.py` - Logging configuration
-- `src/scrapers/scraper.py` - Refactored scraper with DB integration
-- `scripts/run_scraper.py` - Scraper execution script
-- `.env` - Local environment configuration
+### ✅ Phase 3.5: Incremental Assignment + 30분 Pipeline - COMPLETED ⭐
+- Centroid-based article assignment
+- Similarity threshold: 0.5
+- Pending articles system
+- Centroid updating (EMA)
+- O(n) complexity vs O(n²) re-clustering
+- **30분 pipeline**: Scraping → AI → Incremental (Celery Chain)
 
-**Features Implemented:**
-1. **Database Layer** (`src/models/database.py`)
-   - Connection pool management with `psycopg2`
-   - `PressRepository`: Press organization CRUD operations
-   - `ArticleRepository`: Article CRUD operations with duplicate checking
-   - KST timezone handling with UTC conversion
-   - `news_date` auto-calculation (5:00 AM KST cutoff)
-   - Context managers for safe DB operations
+**Files**:
+- `src/services/incremental_assignment.py` (455 lines)
+- `scripts/incremental_assign.py`
+- `scripts/run_scraper_with_pipeline.py` ⭐
+- `src/workers/tasks.py` (incremental_assign_articles task)
 
-2. **Scraper Refactor** (`src/scrapers/scraper.py`)
-   - ✅ Removed JSON file output → Direct database save
-   - ✅ Class-based architecture (`NaverNewsScraper`)
-   - ✅ Duplicate checking by URL
-   - ✅ Error handling with try-except blocks
-   - ✅ Statistics tracking (scraped, saved, duplicates, errors)
-   - ✅ KST timezone support
-   - ✅ Infinite scroll handling (max 50 scrolls)
-   - ✅ Rate limiting (configurable delay)
-   - ✅ Support for 6 press companies:
-     - 연합뉴스 (001)
-     - 조선일보 (023)
-     - 동아일보 (020)
-     - YTN (052)
-     - 한겨레 (028)
-     - 경향신문 (032)
+### ⏳ Phase 4: Stance Analysis - WAITING
+- Fine-tuned stance model deployment (ML Engineer)
+- Integrate with AI service
+- Save to stance_analysis table
 
-3. **Key Bug Fixes:**
-   - ✅ Schema column name matching (url → article_url, thumbnail_url → img_url)
-   - ✅ press_id type correction (integer → varchar)
-   - ✅ Timezone constraint handling (KST → UTC conversion)
-   - ✅ Database connection pool management
-   - ✅ Environment variable precedence (.env vs system env)
-
-4. **Testing Results:**
-   ```
-   ✓ Scraper successfully connects to local PostgreSQL
-   ✓ Articles saved to database with correct schema
-   ✓ Duplicate detection working
-   ✓ Timezone conversion (KST → UTC) working
-   ✓ news_date auto-calculation working
-   ✓ Error handling and logging working
-   ```
-
-5. **Database Schema Verification:**
-   - All 6 tables created and indexed
-   - pgvector extension enabled (v0.8.1)
-   - Foreign key constraints working
-   - Triggers for article count auto-update working
-
-### 🚧 In Progress
-- Celery task implementation
-- AI service client
-- FastAPI endpoints
-- Topic clustering algorithm
-- Recommendation engine
-
-### 📋 TODO (Remaining Phases)
-
-**Phase 2: Batch Summarization**
-- Implement Celery workers
-- Create AI service client
-- Build batch processing queue
-
-**Phase 3: Topic Clustering**
-- Implement clustering algorithm
-- Generate embeddings with pgvector
-- Select top 7 topics
-
-**Phase 4: Batch Stance Analysis**
-- Integrate stance analysis AI model
-- Process articles by topic
-
-**Phase 5: Recommendation & API**
-- Build recommendation engine
-- Create FastAPI endpoints
+### ⏳ Phase 5: API & Recommendations - TODO (HIGH PRIORITY)
+- FastAPI endpoints for frontend
+- Recommendation engine (top 3 per stance)
+- CORS configuration
 - Deploy to Render
-
-**General:**
-- Write tests (pytest)
-- Deploy to Render
-- Integrate with frontend
-- Performance optimization
-- Monitoring and logging enhancements
 
 ## Next Steps
 
-1. ~~**Improve Scraper**~~ ✅ COMPLETED
-   - ~~Remove JSON file output, save directly to DB~~
-   - ~~Add error handling and retry logic~~
-   - ~~Implement duplicate checking~~
+**Immediate Priority**: FastAPI Endpoints Implementation
 
-2. **Implement Celery Tasks** (`src/workers/tasks.py`)
-   - `process_summarization_batch(article_ids)`
-   - `process_stance_analysis_batch(article_topic_pairs)`
-   - Add retry logic with exponential backoff
+1. Create API routes:
+   - `backend/src/api/routes/health.py`
+   - `backend/src/api/routes/topics.py`
+   - `backend/src/api/routes/articles.py`
 
-3. **Build AI Service Client** (`src/services/ai_client.py`)
-   - HTTP client for batch API calls
-   - Timeout and error handling
-   - Partial failure tolerance
+2. Pydantic schemas:
+   - `backend/src/api/schemas/responses.py`
 
-4. **Implement Clustering** (`src/services/clustering.py`)
-   - Generate embeddings with pgvector
-   - Cosine similarity based clustering
-   - Select top 7 topics
+3. Main FastAPI app:
+   - `backend/src/api/main.py`
+   - CORS middleware
+   - Router registration
 
-5. **Create FastAPI Endpoints** (`src/api/routes/`)
-   - Topics endpoint
-   - Articles endpoint
-   - Recommendations endpoint
-   - Health check
+4. Key endpoints:
+   - `GET /health`
+   - `GET /api/v1/topics?date=YYYY-MM-DD`
+   - `GET /api/v1/topics/{topic_id}/articles`
+   - `GET /api/v1/articles/{article_id}`
 
-6. **Deploy and Test**
-   - Push to Render
-   - Verify Cron jobs
-   - Test full pipeline end-to-end
+5. Recommendation engine (top 3 per stance per topic)
 
-## Troubleshooting
+6. Deploy to Render
 
-### Docker Issues
-```bash
-# Reset everything
-docker-compose down -v
-docker system prune -a
-docker-compose up -d
-```
+**Later**:
+1. Stance analysis integration (when model ready)
+2. Frontend integration
+3. Performance optimization
+4. Re-enable Yonhap News processing
 
-### Database Connection Issues
-```bash
-# Check PostgreSQL is running
-docker-compose ps
-# Check logs
-docker-compose logs postgres
-# Test connection
-psql postgresql://postgres:postgres@localhost:5432/politics_news_dev
-```
+## Deployment (Render)
 
-### Redis Issues
-```bash
-# Check Redis is running
-docker-compose ps
-# Test connection
-redis-cli -h localhost -p 6379 ping
-```
+**Prerequisites**: Redis instance, PostgreSQL with pgvector, GitHub connected
 
-## Resources
+**render.yaml** handles:
+- Auto-migration on build
+- Environment variables
+- Service configuration
+- Cron jobs (scraper, clustering, incremental assignment)
 
-- [FastAPI Documentation](https://fastapi.tiangolo.com/)
-- [Celery Documentation](https://docs.celeryq.dev/)
-- [Render Documentation](https://render.com/docs)
-- [pgvector Documentation](https://github.com/pgvector/pgvector)
-- [Hugging Face Spaces](https://huggingface.co/spaces)
+**Manual steps**:
+1. Push to GitHub
+2. Connect repository in Render Dashboard
+3. Configure environment variables
+4. Deploy
+
+---
+
+**For detailed API specs**: See AI service docs at https://zedwrkc-news-stance-detection.hf.space/docs
+
+**Current Focus**: FastAPI Endpoints Implementation
+**Test Data**: 243 articles, 7 topics (excluding Yonhap News)

@@ -76,14 +76,14 @@ services:
       - key: AI_SERVICE_BATCH_SIZE
         value: 50
 
-  # Cron Job: Daily News Scraper (5:00 AM KST = 8:00 PM UTC)
+  # Cron Job: News Scraper + Celery Pipeline Trigger (every 30 minutes)
   - type: cron
-    name: politics-news-scraper
+    name: politics-news-scraper-pipeline
     env: python
     region: singapore
-    schedule: "0 20 * * *"
+    schedule: "*/30 * * * *"
     buildCommand: pip install -r requirements.txt
-    startCommand: python scripts/run_scraper.py
+    startCommand: python scripts/run_scraper_with_pipeline.py
     envVars:
       - key: ENVIRONMENT
         value: production
@@ -109,12 +109,12 @@ services:
       - key: TIMEZONE
         value: Asia/Seoul
 
-  # Cron Job: Topic Clustering (runs after summarization)
+  # Cron Job: Full Re-clustering (every 2 hours)
   - type: cron
     name: politics-news-clustering
     env: python
     region: singapore
-    schedule: "0 23 * * *"
+    schedule: "0 */2 * * *"
     buildCommand: pip install -r requirements.txt
     startCommand: python scripts/run_clustering.py
     envVars:
@@ -133,12 +133,21 @@ services:
           name: politics-news-redis
           type: redis
           property: connectionString
+      - key: CLUSTERING_ALGORITHM
+        value: hierarchical
+      - key: CLUSTERING_DISTANCE_THRESHOLD
+        value: 0.5
+      - key: CLUSTERING_MIN_TOPICS
+        value: 5
+      - key: CLUSTERING_MAX_TOPICS
+        value: 10
       - key: CLUSTERING_TOP_N
         value: 7
       - key: CLUSTERING_MIN_SIMILARITY
         value: 0.3
       - key: RECOMMENDATION_PER_STANCE
         value: 3
+
 
 databases:
   # PostgreSQL Database with pgvector

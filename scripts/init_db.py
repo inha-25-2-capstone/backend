@@ -194,7 +194,8 @@ def main():
     print("✅ Database initialization completed successfully!")
     print("=" * 60)
     print("\nYou can now:")
-    print("  • Run the scraper: python scripts/run_scraper.py")
+    print("  • Run the 30min pipeline: python scripts/run_scraper_with_pipeline.py")
+    print("  • Start Celery worker: celery -A src.workers.celery_app worker --loglevel=info")
     print("  • Start the API server: uvicorn src.api.main:app --reload")
     print()
 

@@ -260,7 +260,7 @@ class ArticleRepository:
         with get_db_cursor() as cur:
             cur.execute(
                 """
-                SELECT article_id, title, content
+                SELECT article_id, title, content, press_id
                 FROM article
                 WHERE summary IS NULL OR summary = ''
                 ORDER BY published_at DESC
@@ -283,6 +283,51 @@ class ArticleRepository:
                 (summary, article_id)
             )
             logger.debug(f"Updated summary for article {article_id}")
+
+    @staticmethod
+    def update_summary_and_embedding(
+        article_id: int,
+        summary: Optional[str] = None,
+        embedding: Optional[str] = None
+    ):
+        """
+        Update article summary and/or embedding.
+
+        Args:
+            article_id: Article ID
+            summary: Summary text (optional)
+            embedding: Embedding vector as string '[0.1,0.2,...]' (optional)
+        """
+        updates = []
+        params = []
+
+        if summary is not None:
+            updates.append("summary = %s")
+            params.append(summary)
+
+        if embedding is not None:
+            updates.append("embedding = %s::vector")
+            params.append(embedding)
+
+        if not updates:
+            logger.warning(f"No updates provided for article {article_id}")
+            return
+
+        params.append(article_id)
+
+        query = f"""
+            UPDATE article
+            SET {', '.join(updates)}
+            WHERE article_id = %s
+        """
+
+        with get_db_cursor() as cur:
+            cur.execute(query, params)
+            logger.debug(
+                f"Updated article {article_id} "
+                f"(summary={'yes' if summary else 'no'}, "
+                f"embedding={'yes' if embedding else 'no'})"
+            )
 
 
 # Initialize connection pool when module is imported

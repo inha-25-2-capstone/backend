@@ -1,0 +1,428 @@
+# Political News Backend
+
+Backend service for Korean political news aggregation and analysis system.
+
+## 🚀 Features
+
+- **News Scraping**: Automated scraping from 6 major Korean news sources (30분 주기)
+- **AI Processing**: Summarization + 768-dim embedding generation via HF Spaces
+- **Topic Clustering**: Hierarchical Clustering (threshold=0.6, 5-100 range, 2시간 주기) ⭐
+- **Incremental Assignment**: Real-time article-to-topic matching using centroid similarity (30분 주기)
+- **30분 파이프라인**: Scraping → AI Processing → Incremental Assignment (Celery Chain) ⭐
+- **Database**: PostgreSQL with pgvector extension for similarity search
+- **Task Queue**: Celery + Redis for async processing
+- **Migrations**: Alembic for version-controlled schema management
+
+## 📋 Tech Stack
+
+- **Python 3.12** with virtual environment
+- **FastAPI 0.119.0** - REST API framework (TODO)
+- **PostgreSQL 16** + **pgvector** - Vector database
+- **Redis** - Task queue & caching
+- **Celery** - Async task processing
+- **Selenium 4.35.0** - Web scraping
+- **scikit-learn** - ML clustering
+- **Alembic 1.13.2** - Database migrations
+
+## 🏗️ Architecture
+
+```
+┌─────────────┐     ┌──────────────┐     ┌─────────────┐
+│   Scraper   │────▶│  PostgreSQL  │◀────│   Celery    │
+│  (Naver)    │     │  + pgvector  │     │   Worker    │
+└─────────────┘     └──────────────┘     └──────┬──────┘
+                            │                    │
+                            │                    ▼
+                            │            ┌──────────────┐
+                            │            │ AI Service   │
+                            │            │ (HF Spaces)  │
+                            │            └──────────────┘
+                            ▼
+                    ┌──────────────┐
+                    │   FastAPI    │
+                    │ (TODO)       │
+                    └──────────────┘
+```
+
+## 📊 Data Pipeline
+
+### 30분 주기: 스크래핑 + 파이프라인 ⭐
+1. **Scraping** → Collect news from 6 sources
+2. **Celery Chain Trigger**:
+   - **AI Processing** (배치 5개) → Summary + Embedding generation
+   - **Incremental Assignment** → Assign new articles to topics using centroid similarity
+
+### 2시간 주기: Full Re-Clustering ⭐
+3. **Hierarchical Clustering** → Distance threshold 0.6 (optimized), 5-100 topics range, save top 10 with centroids
+
+### TODO
+4. **API Serving** → Provide data to frontend
+
+## 🛠️ Setup
+
+### Prerequisites
+
+- Python 3.12+
+- Docker & Docker Compose
+- PostgreSQL 16
+- Redis
+
+### Installation
+
+```bash
+# 1. Navigate to backend directory
+cd backend
+
+# 2. Create virtual environment
+python3.12 -m venv venv
+source venv/bin/activate  # Linux/Mac
+# or
+venv\Scripts\activate  # Windows
+
+# 3. Install dependencies
+pip install -r requirements.txt
+
+# 4. Configure environment
+cp .env.example .env
+# Edit .env with your settings
+
+# 5. Start Docker services
+docker compose up -d
+
+# 6. Initialize database
+python scripts/init_db.py
+
+# 7. Verify setup
+docker compose ps
+python scripts/migrate.py current
+```
+
+## 🧪 Running Locally
+
+```bash
+# Terminal 1: Start Celery worker
+celery -A src.workers.celery_app worker --loglevel=info
+
+# Terminal 2: Run 30분 pipeline (scraping + AI + incremental) ⭐
+python scripts/run_scraper_with_pipeline.py
+
+# OR run components manually:
+
+# Terminal 2a: Run scraper only
+python scripts/run_scraper.py
+
+# Terminal 3: Run clustering (Hierarchical, 2시간 주기 시뮬레이션) ⭐
+python scripts/run_clustering.py 2025-10-20 hierarchical
+
+# Terminal 4: Run incremental assignment
+python scripts/incremental_assign.py --date 2025-10-20
+
+# Terminal 5: Start FastAPI (TODO)
+# uvicorn src.api.main:app --reload --port 8000
+```
+
+## 📁 Project Structure
+
+```
+backend/
+├── src/
+│   ├── api/                    # FastAPI application (TODO)
+│   ├── scrapers/               # Naver News scraper ✅
+│   ├── workers/                # Celery tasks ✅
+│   ├── services/               # Business logic ✅
+│   │   ├── clustering.py       # Topic clustering
+│   │   ├── incremental_assignment.py  # Incremental assignment
+│   │   └── ai_client.py        # AI service client
+│   ├── models/                 # Database layer ✅
+│   ├── utils/                  # Utilities ✅
+│   └── config.py               # Configuration ✅
+│
+├── database/
+│   ├── migrations/             # Alembic migrations ✅
+│   └── postgre_schema.sql      # Schema reference
+│
+├── scripts/                    # Executable scripts ✅
+│   ├── run_scraper_with_pipeline.py  # 30분 pipeline ⭐
+│   ├── run_scraper.py          # Scraper only
+│   ├── run_clustering.py       # Clustering (hierarchical) ⭐
+│   ├── incremental_assign.py   # Incremental assignment
+│   ├── init_db.py              # Database initialization
+│   └── migrate.py              # Migration helper
+│
+├── test_ai_pipeline.py         # End-to-end test ✅
+├── docker-compose.yml          # Local development
+├── render.yaml                 # Render deployment
+├── requirements.txt            # Dependencies
+└── alembic.ini                 # Alembic config
+```
+
+## 🗄️ Database Schema
+
+### Core Tables
+
+1. **press** - News organizations (6 sources)
+2. **article** - Full content + summary + embedding (768-dim)
+3. **topic** - Daily top 10 topics with centroids (threshold=0.6, 60.4% coverage)
+4. **topic_article_mapping** - Article-to-topic assignments
+5. **stance_analysis** - Sentiment classification (TODO)
+6. **recommended_article** - Top 3 per stance (TODO)
+7. **pending_articles** - Unmatched articles
+
+### Key Features
+
+- **pgvector extension**: Vector similarity search
+- **Alembic migrations**: Version-controlled schema
+- **IVFFlat index**: Fast centroid matching
+- **Triggers**: Auto-update article counts
+
+## 🔧 Database Migrations
+
+```bash
+# Apply all pending migrations
+python scripts/migrate.py up
+
+# Create new migration
+alembic revision -m "description"
+
+# Check current version
+python scripts/migrate.py current
+
+# View history
+python scripts/migrate.py history
+
+# Rollback one version
+python scripts/migrate.py down
+
+# Reset database (⚠️ destroys all data)
+python scripts/migrate.py reset
+```
+
+## 📝 Common Commands
+
+```bash
+# Run 30분 pipeline (recommended) ⭐
+python scripts/run_scraper_with_pipeline.py
+
+# Run scraper only
+python scripts/run_scraper.py
+
+# Run clustering (hierarchical) ⭐
+python scripts/run_clustering.py [date] hierarchical
+
+# Run incremental assignment
+python scripts/incremental_assign.py [--date YYYY-MM-DD] [--dry-run]
+
+# Start Celery worker
+celery -A src.workers.celery_app worker --loglevel=info
+
+# Run tests
+pytest tests/
+
+# Code formatting
+black src/
+
+# Linting
+flake8 src/
+```
+
+## 🌐 Environment Variables
+
+### Required
+
+- `DB_HOST` - PostgreSQL host (default: localhost)
+- `DB_PORT` - PostgreSQL port (default: 5432)
+- `DB_NAME` - Database name
+- `DB_USER` - Database user
+- `DB_PASSWORD` - Database password
+- `REDIS_URL` - Redis connection URL
+- `AI_SERVICE_URL` - AI service endpoint
+
+### Optional (Clustering)
+
+- `CLUSTERING_ALGORITHM` - Algorithm (default: hierarchical) ⭐
+- `CLUSTERING_DISTANCE_THRESHOLD` - Distance threshold (default: 0.5) ⭐
+- `CLUSTERING_MIN_TOPICS` - Min topics (default: 5) ⭐
+- `CLUSTERING_MAX_TOPICS` - Max topics (default: 10) ⭐
+- `CLUSTERING_TOP_N` - Top N to save (default: 7)
+
+### Optional (Incremental Assignment)
+
+- `INCREMENTAL_SIMILARITY_THRESHOLD` - Similarity threshold (default: 0.5)
+- `INCREMENTAL_CENTROID_UPDATE_WEIGHT` - Centroid update weight (default: 0.1)
+
+## 🚢 Deployment (Render)
+
+### Prerequisites
+
+1. Render account
+2. PostgreSQL instance (with pgvector)
+3. Redis instance
+4. AI service deployed (HF Spaces)
+
+### Steps
+
+```bash
+# 1. Push to GitHub
+git add .
+git commit -m "Deploy backend"
+git push origin main
+
+# 2. In Render Dashboard:
+#    - New → Blueprint
+#    - Connect GitHub repository
+#    - Render reads backend/render.yaml
+#    - Configure environment variables
+#    - Deploy
+
+# 3. Migrations run automatically
+#    (via buildCommand in render.yaml)
+```
+
+### Render Services
+
+- **Web Service**: FastAPI backend (TODO)
+- **Background Worker**: Celery worker
+- **Cron Jobs**:
+  - **30분 주기**: Scraper + Pipeline (scraping → AI → incremental) ⭐
+  - **2시간 주기**: Full Re-Clustering (hierarchical, 5-10 topics) ⭐
+
+## 📊 Current Status (2025-10-22)
+
+### 📈 Statistics
+
+- **Articles Collected**: 243 total (5 press sources)
+  - YTN (052): 99 articles
+  - SBS (020): 47 articles
+  - 경향신문 (032): 47 articles
+  - 한겨레 (028): 27 articles
+  - 조선일보 (023): 23 articles
+  - ~~연합뉴스 (001)~~: Excluded for testing
+
+- **AI Processing**: 227/243 articles (93% success rate)
+  - Batch size: 5 articles
+  - Failed: 16 articles (AI model "index out of range" errors)
+  - Processing time: ~30-50s per batch
+
+- **Topics Created**: 7 topics for 2025-10-20
+  1. 국정감사 '김현지 공방' (104 articles)
+  2. 재판소원 당론 추진 (66 articles)
+  3. 주택시장 안정 (56 articles)
+  4. 캄보디아 감금 사건 (56 articles)
+  5. 윤 대통령 면회 논란 (52 articles)
+  6. 방산·항공우주 투자 (46 articles)
+  7. 남북한 통일 여론조사 (20 articles)
+
+### ✅ Completed Phases
+
+- ✅ Phase 1: News Collection (Scraper + DB integration)
+- ✅ Phase 2: Backend-AI Integration (Celery + AI client with HF Spaces warmup)
+- ✅ Phase 3: Topic Clustering (Hierarchical + centroid storage) ⭐
+- ✅ Phase 3.5: Incremental Assignment (Centroid-based matching)
+- ✅ 30분 Pipeline (Scraping → AI → Incremental) ⭐
+- ✅ 2시간 Re-Clustering (Hierarchical, auto-range 5-10) ⭐
+- ✅ Database Migrations (Alembic)
+
+### 🚧 In Progress
+
+- None
+
+### 📋 TODO (Next Priority)
+
+- ⏭️ Phase 4: Stance Analysis (waiting for ML model)
+- ⏭️ **Phase 5: FastAPI Endpoints (HIGH PRIORITY)**
+  - Health check
+  - Topics API
+  - Articles API
+  - Recommendations API
+- ⏭️ Recommendation Engine (top 3 per stance)
+- ⏭️ Frontend Integration
+
+## 🧪 Testing
+
+### Unit Tests
+
+```bash
+pytest tests/
+```
+
+### Integration Tests
+
+```bash
+# End-to-end pipeline test
+python test_ai_pipeline.py
+```
+
+### Manual Testing
+
+```bash
+# Test scraper
+python scripts/run_scraper.py
+
+# Test clustering (with date)
+python scripts/run_clustering.py 2025-10-20
+
+# Test incremental assignment (dry-run)
+python scripts/incremental_assign.py --date 2025-10-20 --dry-run
+```
+
+## 🐛 Troubleshooting
+
+### Docker Issues
+
+```bash
+# Reset Docker
+docker compose down -v
+docker compose up -d
+```
+
+### Database Connection
+
+```bash
+# Check PostgreSQL
+docker compose ps
+docker compose logs postgres
+
+# Test connection
+psql postgresql://postgres:postgres@localhost:5432/politics_news_dev
+```
+
+### Redis Connection
+
+```bash
+# Check Redis
+docker compose ps
+redis-cli -h localhost -p 6379 ping
+```
+
+### Migration Issues
+
+```bash
+# Check migration status
+python scripts/migrate.py current
+
+# Reset database (⚠️ destroys data)
+python scripts/migrate.py reset
+python scripts/init_db.py
+```
+
+## 📚 Resources
+
+- [FastAPI Docs](https://fastapi.tiangolo.com/)
+- [Celery Docs](https://docs.celeryq.dev/)
+- [pgvector Docs](https://github.com/pgvector/pgvector)
+- [Alembic Docs](https://alembic.sqlalchemy.org/)
+- [Render Docs](https://render.com/docs)
+
+## 📄 License
+
+MIT
+
+## 👥 Team
+
+- Backend Developer: Scraper, API, Celery, deployment
+- Frontend Developer: React application (separate repo)
+- ML Engineer: Stance analysis model (Colab)
+
+---
+
+**AI Service**: https://zedwrkc-news-stance-detection.hf.space

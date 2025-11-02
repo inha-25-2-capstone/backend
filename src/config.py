@@ -27,6 +27,24 @@ if not DATABASE_URL:
 if not DATABASE_URL:
     raise ValueError("DATABASE_URL이 설정되지 않았습니다.")
 
+# AI Service Configuration
+AI_SERVICE_URL = os.getenv("AI_SERVICE_URL", "https://zedwrkc-news-stance-detection.hf.space")
+AI_SERVICE_TIMEOUT = int(os.getenv("AI_SERVICE_TIMEOUT", "120"))
+
+# Redis Configuration
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+
+# Clustering Configuration
+CLUSTERING_ALGORITHM = os.getenv("CLUSTERING_ALGORITHM", "hierarchical")
+CLUSTERING_DISTANCE_THRESHOLD = float(os.getenv("CLUSTERING_DISTANCE_THRESHOLD", "0.6"))
+CLUSTERING_MIN_TOPICS = int(os.getenv("CLUSTERING_MIN_TOPICS", "5"))
+CLUSTERING_MAX_TOPICS = int(os.getenv("CLUSTERING_MAX_TOPICS", "100"))
+CLUSTERING_TOP_N = int(os.getenv("CLUSTERING_TOP_N", "10"))
+
+# Incremental Assignment Configuration
+INCREMENTAL_SIMILARITY_THRESHOLD = float(os.getenv("INCREMENTAL_SIMILARITY_THRESHOLD", "0.5"))
+INCREMENTAL_CENTROID_UPDATE_WEIGHT = float(os.getenv("INCREMENTAL_CENTROID_UPDATE_WEIGHT", "0.1"))
+
 # Pydantic Settings 클래스를 사용하여 환경 변수를 더 안전하게 관리할 수도 있습니다.
 # from pydantic_settings import BaseSettings, SettingsConfigDict
 # class Settings(BaseSettings):

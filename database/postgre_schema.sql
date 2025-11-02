@@ -34,7 +34,9 @@ CREATE TABLE IF NOT EXISTS article (
     img_url VARCHAR(2083),
     published_at TIMESTAMPTZ NOT NULL,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-    
+    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    embedding vector(768),
+
     -- 외래키
     CONSTRAINT fk_article_press FOREIGN KEY (press_id) REFERENCES press(press_id),
     
@@ -55,11 +57,14 @@ COMMENT ON COLUMN article.article_url IS '원문 URL';
 COMMENT ON COLUMN article.img_url IS '대표 이미지 URL';
 COMMENT ON COLUMN article.published_at IS '기사 발행 일시';
 COMMENT ON COLUMN article.created_at IS '데이터 수집 일시';
+COMMENT ON COLUMN article.updated_at IS '데이터 최종 수정 일시 (자동 업데이트)';
+COMMENT ON COLUMN article.embedding IS '768-dimensional embedding vector from ko-sroberta-multitask model';
 
 -- 기사 테이블 인덱스
 CREATE INDEX IF NOT EXISTS idx_published_at ON article(published_at);
 CREATE INDEX IF NOT EXISTS idx_press_published ON article(press_id, published_at);
 CREATE INDEX IF NOT EXISTS idx_news_date ON article(news_date DESC);
+CREATE INDEX IF NOT EXISTS idx_article_embedding_cosine ON article USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
 -- article_url은 UNIQUE 제약조건으로 자동 인덱스 생성되므로 별도 인덱스 불필요
 
 -- ========================================
@@ -75,27 +80,33 @@ CREATE TABLE IF NOT EXISTS topic (
     topic_rank SMALLINT NOT NULL,
     cluster_score DECIMAL(10, 5) NOT NULL,
     article_count INTEGER NOT NULL DEFAULT 0,
+    centroid_embedding vector(768),
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    last_updated TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-    
+
     -- 외래키
     CONSTRAINT fk_topic_main_article FOREIGN KEY (main_article_id) REFERENCES article(article_id),
     
     -- 제약조건
-    CONSTRAINT chk_topic_rank CHECK (topic_rank BETWEEN 1 AND 7),
+    CONSTRAINT chk_topic_rank CHECK (topic_rank BETWEEN 1 AND 10),
     CONSTRAINT chk_main_stance_score CHECK (main_stance_score BETWEEN -1 AND 1),
     CONSTRAINT uq_topic_date_rank UNIQUE (topic_date, topic_rank)
 );
 
-COMMENT ON TABLE topic IS '일일 주요 토픽을 저장하는 테이블 (Top 7)';
+COMMENT ON TABLE topic IS '일일 주요 토픽을 저장하는 테이블 (Top 10)';
 COMMENT ON COLUMN topic.topic_id IS '토픽 고유 ID';
 COMMENT ON COLUMN topic.topic_title IS '토픽 제목';
 COMMENT ON COLUMN topic.main_article_id IS '대표 기사의 ID';
 COMMENT ON COLUMN topic.main_stance IS '대표 기사 스탠스';
 COMMENT ON COLUMN topic.main_stance_score IS '대표 기사 스탠스 점수';
 COMMENT ON COLUMN topic.topic_date IS '토픽 선정 날짜(1일 단위)';
-COMMENT ON COLUMN topic.topic_rank IS '해당 날짜 토픽 순위 (1~7)';
+COMMENT ON COLUMN topic.topic_rank IS '해당 날짜 토픽 순위 (1~10)';
 COMMENT ON COLUMN topic.cluster_score IS '클러스터의 중요도 점수(기사 수, 최신성 등 반영)';
 COMMENT ON COLUMN topic.article_count IS '해당 토픽에 속한 총 기사 개수';
+COMMENT ON COLUMN topic.centroid_embedding IS '토픽의 중심 벡터 (incremental assignment 용)';
+COMMENT ON COLUMN topic.is_active IS '토픽 활성화 상태';
+COMMENT ON COLUMN topic.last_updated IS '토픽 최종 업데이트 일시';
 COMMENT ON COLUMN topic.created_at IS '토픽 생성 일시';
 
 -- 토픽 테이블 인덱스
@@ -232,6 +243,45 @@ CREATE INDEX IF NOT EXISTS idx_topic_type_rank ON recommended_article(
     recommendation_type, 
     recommendation_rank
 );
+
+-- ========================================
+-- 7. 대기 기사 테이블 (pending_articles)
+-- ========================================
+CREATE TABLE IF NOT EXISTS pending_articles (
+    article_id BIGINT PRIMARY KEY,
+    added_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    reason VARCHAR(50),
+    max_similarity DECIMAL(5, 3),
+
+    -- 외래키
+    CONSTRAINT fk_pending_article FOREIGN KEY (article_id) REFERENCES article(article_id) ON DELETE CASCADE
+);
+
+COMMENT ON TABLE pending_articles IS '토픽 할당 대기 중인 기사 (유사도 임계값 미달)';
+COMMENT ON COLUMN pending_articles.article_id IS '대기 중인 기사 ID';
+COMMENT ON COLUMN pending_articles.added_at IS '대기 목록 추가 일시';
+COMMENT ON COLUMN pending_articles.reason IS '대기 사유 (예: below_threshold)';
+COMMENT ON COLUMN pending_articles.max_similarity IS '기존 토픽과의 최대 유사도';
+
+-- 대기 기사 인덱스
+CREATE INDEX IF NOT EXISTS idx_pending_articles_added_at ON pending_articles(added_at);
+
+-- ========================================
+-- 트리거: article.updated_at 자동 업데이트
+-- ========================================
+CREATE OR REPLACE FUNCTION update_article_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_update_article_updated_at ON article;
+CREATE TRIGGER trg_update_article_updated_at
+BEFORE UPDATE ON article
+FOR EACH ROW
+EXECUTE FUNCTION update_article_updated_at();
 
 -- ========================================
 -- 트리거: article_count 자동 업데이트

@@ -14,7 +14,7 @@ import logging
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
-from selenium.common.exceptions import WebDriverException, TimeoutException
+from selenium.common.exceptions import WebDriverException
 from webdriver_manager.chrome import ChromeDriverManager
 
 # Database models
@@ -42,6 +42,8 @@ PRESS_COMPANIES = {
 class NaverNewsScraper:
     """Scraper for Naver News political articles."""
 
+    MIN_CONTENT_LENGTH = 20  # Minimum characters to consider as valid content
+
     def __init__(self, headless: bool = True, delay: int = 2):
         """
         Initialize the scraper.
@@ -57,6 +59,7 @@ class NaverNewsScraper:
             "total_scraped": 0,
             "total_saved": 0,
             "total_duplicates": 0,
+            "total_skipped_no_content": 0,  # Articles with no meaningful content
             "total_errors": 0
         }
 
@@ -209,7 +212,7 @@ class NaverNewsScraper:
             logger.error(f"Failed to parse article {url}: {e}")
             return None
 
-    def _save_article_to_db(self, article_data: Dict[str, any], press_code: str) -> bool:
+    def _save_article_to_db(self, article_data: Dict[str, any], press_code: str) -> Optional[int]:
         """
         Save article to database.
 
@@ -218,14 +221,24 @@ class NaverNewsScraper:
             press_code: Naver press code (e.g., "001")
 
         Returns:
-            True if saved successfully, False if duplicate or error
+            article_id if saved successfully, None otherwise (duplicate, error, or invalid content)
         """
         try:
+            # Check content length (skip articles with no meaningful content)
+            content = article_data.get("content", "").strip()
+            if not content or len(content) < self.MIN_CONTENT_LENGTH:
+                logger.warning(
+                    f"Article has no meaningful content (length: {len(content)}), "
+                    f"skipping: {article_data['url']}"
+                )
+                self.stats["total_skipped_no_content"] += 1
+                return None
+
             # Check for duplicates
             if ArticleRepository.exists_by_url(article_data["url"]):
                 logger.debug(f"Duplicate article skipped: {article_data['url']}")
                 self.stats["total_duplicates"] += 1
-                return False
+                return None
 
             # Get or create press
             press_id = PressRepository.get_or_create(press_code, article_data["press_name"])
@@ -240,16 +253,19 @@ class NaverNewsScraper:
                 img_url=article_data.get("thumbnail_url")
             )
 
-            logger.info(f"Saved article {article_id}: {article_data['title'][:50]}...")
+            logger.info(
+                f"Saved article {article_id}: {article_data['title'][:50]}... "
+                f"(content length: {len(content)})"
+            )
             self.stats["total_saved"] += 1
-            return True
+            return article_id
 
         except Exception as e:
             logger.error(f"Failed to save article to DB: {e}")
             self.stats["total_errors"] += 1
-            return False
+            return None
 
-    def scrape_press(self, press_name: str, press_id: str, target_date: str) -> int:
+    def scrape_press(self, press_name: str, press_id: str, target_date: str) -> List[int]:
         """
         Scrape articles from a specific press for a target date.
 
@@ -259,9 +275,9 @@ class NaverNewsScraper:
             target_date: Target date in YYYY-MM-DD format
 
         Returns:
-            Number of articles saved
+            List of saved article IDs
         """
-        saved_count = 0
+        saved_article_ids = []
         base_url = f"https://media.naver.com/press/{press_id}?sid=100"
 
         logger.info(f"{'=' * 60}")
@@ -305,28 +321,32 @@ class NaverNewsScraper:
 
                 self.stats["total_scraped"] += 1
 
-                # Save to database
-                if self._save_article_to_db(article_data, press_id):
-                    saved_count += 1
+                # Save to database and collect article_id
+                article_id = self._save_article_to_db(article_data, press_id)
+                if article_id:
+                    saved_article_ids.append(article_id)
 
                 # Rate limiting
                 time.sleep(self.delay)
 
-            logger.info(f"Completed {press_name}: {saved_count} articles saved")
+            logger.info(f"Completed {press_name}: {len(saved_article_ids)} articles saved")
 
         except Exception as e:
             logger.error(f"Error scraping {press_name}: {e}")
             self.stats["total_errors"] += 1
 
-        return saved_count
+        return saved_article_ids
 
-    def run(self, press_companies: Dict[str, str] = None):
+    def run(self, press_companies: Dict[str, str] = None) -> List[int]:
         """
         Run the scraper for all press companies.
 
         Args:
             press_companies: Dictionary of press name -> press ID
                            If None, uses default PRESS_COMPANIES
+
+        Returns:
+            List of saved article IDs
         """
         if press_companies is None:
             press_companies = PRESS_COMPANIES
@@ -335,11 +355,14 @@ class NaverNewsScraper:
         logger.info(f"Starting scraper for date: {target_date}")
         logger.info(f"Press companies to scrape: {len(press_companies)}")
 
+        all_article_ids = []
+
         try:
             self._setup_driver()
 
             for press_name, press_id in press_companies.items():
-                self.scrape_press(press_name, press_id, target_date)
+                article_ids = self.scrape_press(press_name, press_id, target_date)
+                all_article_ids.extend(article_ids)
 
         except Exception as e:
             logger.error(f"Scraper error: {e}")
@@ -355,8 +378,11 @@ class NaverNewsScraper:
         logger.info(f"Total scraped: {self.stats['total_scraped']}")
         logger.info(f"Total saved: {self.stats['total_saved']}")
         logger.info(f"Duplicates skipped: {self.stats['total_duplicates']}")
+        logger.info(f"No content skipped: {self.stats['total_skipped_no_content']}")
         logger.info(f"Errors: {self.stats['total_errors']}")
         logger.info(f"{'=' * 60}")
+
+        return all_article_ids
 
 
 def main():
