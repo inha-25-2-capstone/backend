@@ -76,14 +76,14 @@ services:
       - key: AI_SERVICE_BATCH_SIZE
         value: 50
 
-  # Cron Job: News Scraper + Celery Pipeline Trigger (every 30 minutes)
+  # Cron Job: Full Pipeline (Scraping + AI + BERTopic) - every hour
   - type: cron
-    name: politics-news-scraper-pipeline
+    name: politics-news-full-pipeline
     env: python
     region: singapore
-    schedule: "*/30 * * * *"
+    schedule: "0 * * * *"
     buildCommand: pip install -r requirements.txt
-    startCommand: python scripts/run_scraper_with_pipeline.py
+    startCommand: python scripts/run_full_pipeline.py
     envVars:
       - key: ENVIRONMENT
         value: production
@@ -108,45 +108,8 @@ services:
         value: true
       - key: TIMEZONE
         value: Asia/Seoul
-
-  # Cron Job: Full Re-clustering (every 2 hours)
-  - type: cron
-    name: politics-news-clustering
-    env: python
-    region: singapore
-    schedule: "0 */2 * * *"
-    buildCommand: pip install -r requirements.txt
-    startCommand: python scripts/run_clustering.py
-    envVars:
-      - key: ENVIRONMENT
-        value: production
-      - key: PYTHONUNBUFFERED
-        value: 1
-      - key: LOG_LEVEL
-        value: INFO
-      - key: DATABASE_URL
-        fromDatabase:
-          name: politics-news-db
-          property: connectionString
-      - key: REDIS_URL
-        fromService:
-          name: politics-news-redis
-          type: redis
-          property: connectionString
-      - key: CLUSTERING_ALGORITHM
-        value: hierarchical
-      - key: CLUSTERING_DISTANCE_THRESHOLD
-        value: 0.5
-      - key: CLUSTERING_MIN_TOPICS
-        value: 5
-      - key: CLUSTERING_MAX_TOPICS
-        value: 10
-      - key: CLUSTERING_TOP_N
-        value: 7
-      - key: CLUSTERING_MIN_SIMILARITY
-        value: 0.3
-      - key: RECOMMENDATION_PER_STANCE
-        value: 3
+      - key: AI_SERVICE_URL
+        sync: false
 
 
 databases:

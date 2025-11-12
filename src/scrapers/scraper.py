@@ -18,7 +18,7 @@ from selenium.common.exceptions import WebDriverException
 from webdriver_manager.chrome import ChromeDriverManager
 
 # Database models
-from src.models.database import PressRepository, ArticleRepository
+from src.models.database import PressRepository, ArticleRepository, calculate_news_date
 from src.utils.logger import setup_logger
 
 # Setup logger
@@ -95,9 +95,23 @@ class NaverNewsScraper:
             logger.info("Chrome driver closed")
 
     def _get_today_date_str(self) -> str:
-        """Get today's date in KST (YYYY-MM-DD format)."""
+        """
+        Get today's date in KST with 5:00 AM cutoff (YYYY-MM-DD format).
+
+        Articles published before 5:00 AM belong to previous day's news cycle.
+        This ensures consistency with the pipeline's news_date calculation.
+        """
         now_kst = datetime.now(KST)
-        return now_kst.strftime("%Y-%m-%d")
+
+        # Apply 5:00 AM cutoff
+        if now_kst.hour < 5:
+            # Before 5:00 AM - use previous day
+            target_date = (now_kst - timedelta(days=1)).date()
+        else:
+            # After 5:00 AM - use current day
+            target_date = now_kst.date()
+
+        return target_date.strftime("%Y-%m-%d")
 
     def _scroll_to_load_all(self, press_name: str):
         """
@@ -313,10 +327,11 @@ class NaverNewsScraper:
                 if not article_data:
                     continue
 
-                # Check if article is from target date
-                article_date = article_data["published_at"].strftime("%Y-%m-%d")
-                if article_date != target_date:
-                    logger.debug(f"Skipping article from different date: {article_date}")
+                # Check if article is from target date (using 5AM cutoff logic)
+                article_news_date = calculate_news_date(article_data["published_at"])
+                article_date_str = article_news_date.strftime("%Y-%m-%d")
+                if article_date_str != target_date:
+                    logger.debug(f"Skipping article from different news_date: {article_date_str} (target: {target_date})")
                     continue
 
                 self.stats["total_scraped"] += 1

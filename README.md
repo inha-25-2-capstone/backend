@@ -4,11 +4,12 @@ Backend service for Korean political news aggregation and analysis system.
 
 ## 🚀 Features
 
-- **News Scraping**: Automated scraping from 6 major Korean news sources (30분 주기)
-- **AI Processing**: Summarization + 768-dim embedding generation via HF Spaces
-- **Topic Clustering**: Hierarchical Clustering (threshold=0.6, 5-100 range, 2시간 주기) ⭐
-- **Incremental Assignment**: Real-time article-to-topic matching using centroid similarity (30분 주기)
-- **30분 파이프라인**: Scraping → AI Processing → Incremental Assignment (Celery Chain) ⭐
+- **News Scraping**: Automated scraping from 6 major Korean news sources (1시간 주기) ⭐
+- **AI Processing**: Summarization + 768-dim embedding (Title+Summary) via HF Spaces ⭐
+- **BERTopic Clustering**: Backend sklearn clustering with pre-computed embeddings ⭐
+- **Real Cosine Similarity**: Article-topic similarity calculation (0.33-0.93 range) ⭐
+- **Topic Centroids**: Stored in DB for ranking and recommendation ⭐
+- **1시간 파이프라인**: Scraping → AI Processing → BERTopic (Celery Chain) ⭐
 - **Database**: PostgreSQL with pgvector extension for similarity search
 - **Task Queue**: Celery + Redis for async processing
 - **Migrations**: Alembic for version-controlled schema management
@@ -46,17 +47,23 @@ Backend service for Korean political news aggregation and analysis system.
 
 ## 📊 Data Pipeline
 
-### 30분 주기: 스크래핑 + 파이프라인 ⭐
-1. **Scraping** → Collect news from 6 sources
-2. **Celery Chain Trigger**:
-   - **AI Processing** (배치 5개) → Summary + Embedding generation
-   - **Incremental Assignment** → Assign new articles to topics using centroid similarity
-
-### 2시간 주기: Full Re-Clustering ⭐
-3. **Hierarchical Clustering** → Distance threshold 0.6 (optimized), 5-100 topics range, save top 10 with centroids
+### 1시간 주기: Full Pipeline ⭐
+1. **Scraping** (Synchronous) → Collect news from 6 sources → DB
+2. **Celery Chain**:
+   - **AI Processing** (Celery Task) → Summary + Embedding (Title+Summary, 768-dim) → DB
+     - Batch size: 50 articles
+     - HF Spaces warmup handling
+   - **BERTopic Clustering** (Celery Task, Backend) → sklearn clustering with DB embeddings → Save topics ⭐
+     - CustomTokenizer for Korean text
+     - CountVectorizer + c-TF-IDF
+     - Auto topic detection (min_topic_size=5)
+     - **Calculate topic centroids** (mean of article embeddings) ⭐
+     - **Calculate real cosine similarity** (article ↔ centroid) ⭐
+     - Save centroid_embedding and similarity_scores to DB ⭐
 
 ### TODO
-4. **API Serving** → Provide data to frontend
+3. **Stance Analysis** (Celery Task) → Topic-based 옹호/중립/비판 classification
+4. **API Serving** → FastAPI endpoints for frontend
 
 ## 🛠️ Setup
 
@@ -103,21 +110,18 @@ python scripts/migrate.py current
 # Terminal 1: Start Celery worker
 celery -A src.workers.celery_app worker --loglevel=info
 
-# Terminal 2: Run 30분 pipeline (scraping + AI + incremental) ⭐
-python scripts/run_scraper_with_pipeline.py
+# Terminal 2: Run 1시간 pipeline (scraping + AI + BERTopic) ⭐
+python scripts/run_full_pipeline.py
 
 # OR run components manually:
 
 # Terminal 2a: Run scraper only
 python scripts/run_scraper.py
 
-# Terminal 3: Run clustering (Hierarchical, 2시간 주기 시뮬레이션) ⭐
-python scripts/run_clustering.py 2025-10-20 hierarchical
+# Terminal 2b: Process articles with AI
+python scripts/process_all_articles.py
 
-# Terminal 4: Run incremental assignment
-python scripts/incremental_assign.py --date 2025-10-20
-
-# Terminal 5: Start FastAPI (TODO)
+# Terminal 3: Start FastAPI (TODO)
 # uvicorn src.api.main:app --reload --port 8000
 ```
 
@@ -130,8 +134,7 @@ backend/
 │   ├── scrapers/               # Naver News scraper ✅
 │   ├── workers/                # Celery tasks ✅
 │   ├── services/               # Business logic ✅
-│   │   ├── clustering.py       # Topic clustering
-│   │   ├── incremental_assignment.py  # Incremental assignment
+│   │   ├── bertopic_service.py # BERTopic clustering (backend) ⭐
 │   │   └── ai_client.py        # AI service client
 │   ├── models/                 # Database layer ✅
 │   ├── utils/                  # Utilities ✅
@@ -142,10 +145,9 @@ backend/
 │   └── postgre_schema.sql      # Schema reference
 │
 ├── scripts/                    # Executable scripts ✅
-│   ├── run_scraper_with_pipeline.py  # 30분 pipeline ⭐
+│   ├── run_full_pipeline.py    # 1시간 pipeline ⭐
 │   ├── run_scraper.py          # Scraper only
-│   ├── run_clustering.py       # Clustering (hierarchical) ⭐
-│   ├── incremental_assign.py   # Incremental assignment
+│   ├── process_all_articles.py # Batch AI processing
 │   ├── init_db.py              # Database initialization
 │   └── migrate.py              # Migration helper
 │
@@ -161,19 +163,19 @@ backend/
 ### Core Tables
 
 1. **press** - News organizations (6 sources)
-2. **article** - Full content + summary + embedding (768-dim)
-3. **topic** - Daily top 10 topics with centroids (threshold=0.6, 60.4% coverage)
-4. **topic_article_mapping** - Article-to-topic assignments
-5. **stance_analysis** - Sentiment classification (TODO)
+2. **article** - Full content + summary + embedding (768-dim from Title+Summary) ⭐
+3. **topic** - Daily topics from BERTopic clustering + centroid_embedding ⭐
+4. **topic_article_mapping** - Article-to-topic assignments with real similarity scores (0.33-0.93) ⭐
+5. **stance_analysis** - 옹호/중립/비판 classification (TODO)
 6. **recommended_article** - Top 3 per stance (TODO)
-7. **pending_articles** - Unmatched articles
 
 ### Key Features
 
 - **pgvector extension**: Vector similarity search
 - **Alembic migrations**: Version-controlled schema
-- **IVFFlat index**: Fast centroid matching
-- **Triggers**: Auto-update article counts
+- **Embeddings**: From "Title + Summary" for BERTopic consistency ⭐
+- **Centroids**: Each topic has centroid_embedding for ranking ⭐
+- **Real Similarity**: Cosine similarity scores (not hardcoded) ⭐
 
 ## 🔧 Database Migrations
 
@@ -200,17 +202,14 @@ python scripts/migrate.py reset
 ## 📝 Common Commands
 
 ```bash
-# Run 30분 pipeline (recommended) ⭐
-python scripts/run_scraper_with_pipeline.py
+# Run 1시간 pipeline (recommended) ⭐
+python scripts/run_full_pipeline.py
 
 # Run scraper only
 python scripts/run_scraper.py
 
-# Run clustering (hierarchical) ⭐
-python scripts/run_clustering.py [date] hierarchical
-
-# Run incremental assignment
-python scripts/incremental_assign.py [--date YYYY-MM-DD] [--dry-run]
+# Process articles with AI
+python scripts/process_all_articles.py
 
 # Start Celery worker
 celery -A src.workers.celery_app worker --loglevel=info
@@ -237,18 +236,11 @@ flake8 src/
 - `REDIS_URL` - Redis connection URL
 - `AI_SERVICE_URL` - AI service endpoint
 
-### Optional (Clustering)
+### Optional (BERTopic Clustering) ⭐
 
-- `CLUSTERING_ALGORITHM` - Algorithm (default: hierarchical) ⭐
-- `CLUSTERING_DISTANCE_THRESHOLD` - Distance threshold (default: 0.5) ⭐
-- `CLUSTERING_MIN_TOPICS` - Min topics (default: 5) ⭐
-- `CLUSTERING_MAX_TOPICS` - Max topics (default: 10) ⭐
-- `CLUSTERING_TOP_N` - Top N to save (default: 7)
-
-### Optional (Incremental Assignment)
-
-- `INCREMENTAL_SIMILARITY_THRESHOLD` - Similarity threshold (default: 0.5)
-- `INCREMENTAL_CENTROID_UPDATE_WEIGHT` - Centroid update weight (default: 0.1)
+- `BERTOPIC_MIN_TOPIC_SIZE` - Minimum articles per topic (default: 5)
+- `BERTOPIC_NR_TOPICS` - Number of topics (default: "auto")
+- `BERTOPIC_TOP_N_WORDS` - Keywords per topic (default: 10)
 
 ## 🚢 Deployment (Render)
 
@@ -282,44 +274,39 @@ git push origin main
 
 - **Web Service**: FastAPI backend (TODO)
 - **Background Worker**: Celery worker
-- **Cron Jobs**:
-  - **30분 주기**: Scraper + Pipeline (scraping → AI → incremental) ⭐
-  - **2시간 주기**: Full Re-Clustering (hierarchical, 5-10 topics) ⭐
+- **Cron Job**:
+  - **1시간 주기**: Full Pipeline (Scraping → AI → BERTopic → Stance) ⭐
 
-## 📊 Current Status (2025-10-22)
+## 📊 Current Status (2025-11-11)
 
-### 📈 Statistics
+### 📈 Recent Verification
 
-- **Articles Collected**: 243 total (5 press sources)
-  - YTN (052): 99 articles
-  - SBS (020): 47 articles
-  - 경향신문 (032): 47 articles
-  - 한겨레 (028): 27 articles
-  - 조선일보 (023): 23 articles
-  - ~~연합뉴스 (001)~~: Excluded for testing
+- **Articles Processed**: 200 articles with embeddings
+- **AI Processing**: Batch size 50, ~30-50s per batch
+- **Topics Created**: 8 topics for 2025-11-11
+  1. 대장동 항소 포기 (82 articles, avg similarity: 0.649)
+  2. 대통령은 11일 국무회의에서 (28 articles, avg similarity: 0.673)
+  3. tf 12 공직자 (25 articles, avg similarity: 0.706)
+  4. 의원은 미국 인도 (19 articles, avg similarity: 0.543)
+  5. 암표 3법 과징금 (12 articles, avg similarity: 0.699)
+  6. 오세훈 종묘 15 (9 articles, avg similarity: 0.767)
+  7. kis 협약기업 북한 (6 articles, avg similarity: 0.723)
+  8. 중국 다이빙 주한중국대사는 (6 articles, avg similarity: 0.882)
 
-- **AI Processing**: 227/243 articles (93% success rate)
-  - Batch size: 5 articles
-  - Failed: 16 articles (AI model "index out of range" errors)
-  - Processing time: ~30-50s per batch
-
-- **Topics Created**: 7 topics for 2025-10-20
-  1. 국정감사 '김현지 공방' (104 articles)
-  2. 재판소원 당론 추진 (66 articles)
-  3. 주택시장 안정 (56 articles)
-  4. 캄보디아 감금 사건 (56 articles)
-  5. 윤 대통령 면회 논란 (52 articles)
-  6. 방산·항공우주 투자 (46 articles)
-  7. 남북한 통일 여론조사 (20 articles)
+- **Similarity Scores**:
+  - Range: 0.33 - 0.93 (real cosine similarity, not hardcoded) ⭐
+  - All topics have centroid_embedding stored ⭐
+  - Average similarity per topic varies (0.54 - 0.88) ⭐
 
 ### ✅ Completed Phases
 
 - ✅ Phase 1: News Collection (Scraper + DB integration)
 - ✅ Phase 2: Backend-AI Integration (Celery + AI client with HF Spaces warmup)
-- ✅ Phase 3: Topic Clustering (Hierarchical + centroid storage) ⭐
-- ✅ Phase 3.5: Incremental Assignment (Centroid-based matching)
-- ✅ 30분 Pipeline (Scraping → AI → Incremental) ⭐
-- ✅ 2시간 Re-Clustering (Hierarchical, auto-range 5-10) ⭐
+- ✅ Phase 3: BERTopic Clustering (sklearn backend with Title+Summary embeddings) ⭐
+  - ✅ Real cosine similarity calculation (article ↔ topic centroid) ⭐
+  - ✅ Topic centroids stored in DB (for ranking/recommendation) ⭐
+  - ✅ Verified: 0.33-0.93 similarity range (2025-11-11, 8 topics) ⭐
+- ✅ 1시간 Pipeline (Scraping → AI → BERTopic with Similarity) ⭐
 - ✅ Database Migrations (Alembic)
 
 ### 🚧 In Progress
@@ -358,11 +345,11 @@ python test_ai_pipeline.py
 # Test scraper
 python scripts/run_scraper.py
 
-# Test clustering (with date)
-python scripts/run_clustering.py 2025-10-20
+# Test AI processing
+python scripts/process_all_articles.py
 
-# Test incremental assignment (dry-run)
-python scripts/incremental_assign.py --date 2025-10-20 --dry-run
+# Test full pipeline
+python scripts/run_full_pipeline.py
 ```
 
 ## 🐛 Troubleshooting

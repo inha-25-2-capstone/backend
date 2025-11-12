@@ -15,6 +15,7 @@ logger = setup_logger()
 class ArticleInput:
     """Input article for AI processing"""
     article_id: int
+    title: str
     content: str
 
 
@@ -39,7 +40,7 @@ class AIServiceClient:
         base_url: str,
         timeout: int = 120,
         max_retries: int = 3,
-        warmup_timeout: int = 60
+        warmup_timeout: int = 120
     ):
         """
         Initialize AI service client
@@ -124,6 +125,7 @@ class AIServiceClient:
             "articles": [
                 {
                     "article_id": article.article_id,
+                    "title": article.title,
                     "content": article.content
                 }
                 for article in articles
