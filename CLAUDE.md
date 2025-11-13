@@ -8,14 +8,17 @@ Backend development guide for Political News Aggregation System.
 
 **Architecture**: Hybrid cloud - Render (backend + BERTopic) + HF Spaces (AI service) + Redis (task queue)
 
-**Current Status (2025-11-11)**:
+**Current Status (2025-11-13)**:
 - ✅ BERTopic clustering with Title+Summary embeddings ⭐
 - ✅ Real cosine similarity calculation (article ↔ topic centroid) ⭐
 - ✅ Topic centroids stored in DB for ranking ⭐
 - ✅ 1시간 파이프라인 (Scraping → AI → BERTopic with Similarity) ⭐
 - ✅ Backend-based clustering (sklearn BERTopic) ⭐
 - ✅ Verified: 0.33-0.93 similarity range (8 topics) ⭐
-- ⏳ FastAPI endpoints (next priority)
+- ✅ **FastAPI endpoints** (Health, Topics, Articles, Press) ⭐
+- ✅ **API testing** completed with real data (1,041 articles, 8 topics) ⭐
+- ✅ Frontend structure (React 19 + TypeScript + TanStack Query in front/ folder) ⭐
+- ⏳ Recommendation Engine (next priority)
 - ⏳ Stance analysis (model training in progress)
 
 ## Technology Stack
@@ -32,7 +35,18 @@ Backend development guide for Political News Aggregation System.
 ```
 backend/
 ├── src/
-│   ├── api/                      # FastAPI application (TODO)
+│   ├── api/                      # FastAPI application ✅
+│   │   ├── main.py               # FastAPI app with CORS
+│   │   ├── routes/               # API routes (Health, Topics, Articles, Press)
+│   │   │   ├── __init__.py
+│   │   │   ├── health.py
+│   │   │   ├── topics.py
+│   │   │   ├── articles.py
+│   │   │   └── press.py
+│   │   └── schemas/              # Pydantic models
+│   │       ├── __init__.py
+│   │       ├── common.py         # Common schemas (Pagination, Stance, etc.)
+│   │       └── responses.py      # Response models
 │   ├── scrapers/                 # Naver News scraper ✅
 │   │   └── scraper.py
 │   ├── workers/                  # Celery tasks ✅
@@ -54,6 +68,7 @@ backend/
 │           └── 6659f7177381_add_centroid_pending.py
 ├── scripts/
 │   ├── run_full_pipeline.py      # 1시간 pipeline (scraping+AI+BERTopic) ⭐
+│   ├── run_api.py                # API server startup ✅
 │   ├── run_scraper.py            # News collection only
 │   ├── process_all_articles.py   # Batch AI processing
 │   ├── init_db.py                # Database initialization
@@ -82,15 +97,15 @@ backend/
 
 ## Data Pipeline
 
-**Status**: Phase 1-3 Complete ✅ | Phase 4-5 TODO
+**Status**: Phase 1-4 Complete ✅ | Phase 5-6 TODO
 
 ```
 1시간 주기: 스크래핑 + AI + BERTopic ⭐
 
-Phase 1: News Collection (Synchronous)
+Phase 1: News Collection (Synchronous) ✅
 Naver News → Selenium Scraper → PostgreSQL (article table)
             ↓
-Phase 2: AI Processing (Celery Task)
+Phase 2: AI Processing (Celery Task) ✅
    POST /batch-process-articles to AI Service (HF Spaces)
    ├─ Input: {article_id, title, content}  ⭐ title 추가
    ├─ Output: {summary, embedding(768-dim from title+summary)}  ⭐
@@ -98,7 +113,7 @@ Phase 2: AI Processing (Celery Task)
    ├─ Batch size: 50 articles
    └─ Save to DB: UPDATE article SET summary, embedding
             ↓
-Phase 3: BERTopic Clustering (Celery Task, Backend) ⭐
+Phase 3: BERTopic Clustering (Celery Task, Backend) ⭐ ✅
    Fetch embeddings from DB → sklearn BERTopic clustering
    ├─ Input: Stored embeddings (768-dim)
    ├─ CustomTokenizer for Korean text (regex-based)
@@ -107,12 +122,19 @@ Phase 3: BERTopic Clustering (Celery Task, Backend) ⭐
    ├─ Calculate topic centroids (mean of embeddings) ⭐
    ├─ Calculate real cosine similarity (article ↔ centroid) ⭐
    └─ Save to DB: topic (with centroid), topic_article_mapping (with similarity) ⭐
+            ↓
+Phase 4: FastAPI Endpoints ⭐ ✅
+   Health, Topics, Articles, Press APIs
+   ├─ Pydantic schemas with Optional stance fields
+   ├─ CORS configuration for frontend
+   ├─ Pagination support
+   └─ API testing completed (1,041 articles, 8 topics, 6 press)
 
-Phase 4: Stance Analysis (TODO - when model ready)
+Phase 5: Stance Analysis (TODO - when model ready)
 Title + Summary → Stance model → 옹호/중립/비판
 
-Phase 5: API & Recommendations (TODO)
-FastAPI endpoints → Frontend
+Phase 6: Recommendations (TODO)
+Top 3 articles per stance using similarity scores
 ```
 
 ## AI Service Integration
@@ -176,12 +198,15 @@ celery -A src.workers.celery_app worker --loglevel=info
 # 5. Run 1시간 pipeline (recommended) ⭐
 python scripts/run_full_pipeline.py
 
+# 6. Run API server (in separate terminal) ⭐
+python scripts/run_api.py  # Runs on http://localhost:8000
+
 # OR run components manually:
 
-# 6a. Run scraper only
+# 7a. Run scraper only
 python scripts/run_scraper.py
 
-# 6b. Process articles with AI
+# 7b. Process articles with AI
 python scripts/process_all_articles.py
 ```
 
@@ -285,49 +310,56 @@ python scripts/migrate.py down
 - `src/services/bertopic_service.py` (clustering logic + similarity calculation) ⭐
 - `src/workers/tasks.py` (bertopic_clustering_task with centroid storage) ⭐
 
-### ⏳ Phase 4: Stance Analysis - TODO
+### ✅ Phase 4: FastAPI Endpoints - COMPLETED ⭐
+- Health check endpoint
+- Topics API (list, detail, articles by topic)
+- Articles API (list, detail with multiple filters)
+- Press API (list, articles by press)
+- Pydantic schemas with Optional stance fields
+- CORS configuration for frontend (ports 5173, 3000)
+- Pagination support (offset/limit)
+- **API testing completed** (1,041 articles, 8 topics, 6 press) ✅
+- Bug fix: NULL topic_rank/cluster_score handling
+
+**Files**:
+- `src/api/main.py` (FastAPI app + CORS)
+- `src/api/routes/` (health, topics, articles, press)
+- `src/api/schemas/` (common, responses)
+- `scripts/run_api.py` (API startup script)
+
+### ⏳ Phase 5: Stance Analysis - TODO
 - Fine-tuned stance model deployment (ML Engineer)
 - Input: Title + Summary only (no topic information)
 - Integrate with AI service
 - Save to stance_analysis table
 
-### ⏳ Phase 5: API & Recommendations - TODO (HIGH PRIORITY)
-- FastAPI endpoints for frontend
-- Recommendation engine (top 3 per stance)
-- CORS configuration
-- Deploy to Render
+### ⏳ Phase 6: Recommendations - TODO (HIGH PRIORITY)
+- Recommendation engine (top 3 per stance per topic)
+- Use cosine similarity scores from topic_article_mapping
+- Create recommendation endpoint
 
 ## Next Steps
 
-**Immediate Priority**: FastAPI Endpoints Implementation
+**Immediate Priority**: Recommendation Engine
 
-1. Create API routes:
-   - `backend/src/api/routes/health.py`
-   - `backend/src/api/routes/topics.py`
-   - `backend/src/api/routes/articles.py`
+1. Implement recommendation algorithm:
+   - Select top 3 articles per stance (support/neutral/oppose)
+   - Use cosine similarity scores from topic_article_mapping
+   - Consider article quality metrics
 
-2. Pydantic schemas:
-   - `backend/src/api/schemas/responses.py`
+2. Create recommendation endpoint:
+   - `GET /api/topics/{topic_id}/recommendations`
+   - Returns top 3 per stance
 
-3. Main FastAPI app:
-   - `backend/src/api/main.py`
-   - CORS middleware
-   - Router registration
-
-4. Key endpoints:
-   - `GET /health`
-   - `GET /api/v1/topics?date=YYYY-MM-DD`
-   - `GET /api/v1/topics/{topic_id}/articles`
-   - `GET /api/v1/articles/{article_id}`
-
-5. Recommendation engine (top 3 per stance per topic)
-
-6. Deploy to Render
+**Phase 2 - Stance Analysis Integration** (when model ready):
+   - Integrate fine-tuned KoBERT model
+   - Add stance prediction to AI processing pipeline
+   - Update recommendation logic to use real stance data
 
 **Later**:
-1. Stance analysis integration (when model ready)
-2. Frontend integration
-3. Performance optimization
+1. Frontend-Backend Integration
+2. Deployment to Render
+3. Performance optimization (caching, query optimization)
 
 ## Deployment (Render)
 
@@ -349,5 +381,10 @@ python scripts/migrate.py down
 
 **For detailed API specs**: See AI service docs at https://zedwrkc-news-stance-detection.hf.space/docs
 
-**Current Focus**: FastAPI Endpoints Implementation
-**Architecture**: 1시간 주기 파이프라인 (Scraping → AI → BERTopic) ⭐
+**Current Focus**:
+- Backend: FastAPI Endpoints Implementation (Phase 1-3)
+- Frontend: Router setup and API integration (in front/ folder)
+
+**Architecture**:
+- Backend: 1시간 주기 파이프라인 (Scraping → AI → BERTopic with Similarity) ⭐
+- Frontend: React 19 + TypeScript + TanStack Query + Material-UI ⭐

@@ -1,7 +1,7 @@
-DO $$ 
+DO $$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'stance_type') THEN
-        CREATE TYPE stance_type AS ENUM ('옹호', '중립', '비판');
+        CREATE TYPE stance_type AS ENUM ('support', 'neutral', 'oppose');
     END IF;
 END $$;
 
@@ -170,9 +170,9 @@ CREATE TABLE IF NOT EXISTS stance_analysis (
     CONSTRAINT chk_stance_score CHECK (stance_score BETWEEN -1 AND 1),
     CONSTRAINT chk_prob_sum CHECK (ABS(prob_positive + prob_neutral + prob_negative - 1.0) <= 0.001),
     CONSTRAINT chk_stance_consistency CHECK (
-        (stance_label = '옹호' AND prob_positive >= prob_neutral AND prob_positive >= prob_negative) OR
-        (stance_label = '중립' AND prob_neutral >= prob_positive AND prob_neutral >= prob_negative) OR
-        (stance_label = '비판' AND prob_negative >= prob_positive AND prob_negative >= prob_neutral)
+        (stance_label = 'support' AND prob_positive >= prob_neutral AND prob_positive >= prob_negative) OR
+        (stance_label = 'neutral' AND prob_neutral >= prob_positive AND prob_neutral >= prob_negative) OR
+        (stance_label = 'oppose' AND prob_negative >= prob_positive AND prob_negative >= prob_neutral)
     )
 );
 

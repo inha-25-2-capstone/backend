@@ -277,7 +277,7 @@ git push origin main
 - **Cron Job**:
   - **1시간 주기**: Full Pipeline (Scraping → AI → BERTopic → Stance) ⭐
 
-## 📊 Current Status (2025-11-11)
+## 📊 Current Status (2025-11-12)
 
 ### 📈 Recent Verification
 
@@ -300,6 +300,7 @@ git push origin main
 
 ### ✅ Completed Phases
 
+**Backend**:
 - ✅ Phase 1: News Collection (Scraper + DB integration)
 - ✅ Phase 2: Backend-AI Integration (Celery + AI client with HF Spaces warmup)
 - ✅ Phase 3: BERTopic Clustering (sklearn backend with Title+Summary embeddings) ⭐
@@ -309,6 +310,14 @@ git push origin main
 - ✅ 1시간 Pipeline (Scraping → AI → BERTopic with Similarity) ⭐
 - ✅ Database Migrations (Alembic)
 
+**Frontend** (in front/ folder):
+- ✅ Project setup (Vite + React 19 + TypeScript)
+- ✅ Component architecture (Common, Layout, Article, Topic, Press, Dashboard)
+- ✅ Pages structure (MainPage, TopicDetailPage, ArticleDetailPage, etc.)
+- ✅ TanStack Query hooks and API services
+- ✅ TypeScript types and Mock data
+- ✅ CI/CD pipeline (GitHub Actions)
+
 ### 🚧 In Progress
 
 - None
@@ -317,10 +326,15 @@ git push origin main
 
 - ⏭️ Phase 4: Stance Analysis (waiting for ML model)
 - ⏭️ **Phase 5: FastAPI Endpoints (HIGH PRIORITY)**
-  - Health check
-  - Topics API
-  - Articles API
-  - Recommendations API
+  - `GET /health` - Health check
+  - `GET /api/topics` - Topic list (Top 7 for main page)
+  - `GET /api/topics/{topic_id}` - Topic detail
+  - `GET /api/topics/{topic_id}/articles` - Articles by topic (with stance filter)
+  - `GET /api/articles` - All articles (with filters)
+  - `GET /api/articles/{article_id}` - Article detail
+  - `GET /api/press` - Press list
+  - `GET /api/press/{press_id}/articles` - Articles by press
+  - `GET /api/topics/{topic_id}/recommendations` - Recommended articles (top 3 per stance)
 - ⏭️ Recommendation Engine (top 3 per stance)
 - ⏭️ Frontend Integration
 
@@ -407,7 +421,7 @@ MIT
 ## 👥 Team
 
 - Backend Developer: Scraper, API, Celery, deployment
-- Frontend Developer: React application (separate repo)
+- Frontend Developer: React application (front/ folder) ✅
 - ML Engineer: Stance analysis model (Colab)
 
 ---
