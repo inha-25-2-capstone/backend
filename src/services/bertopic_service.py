@@ -7,6 +7,10 @@ Uses sklearn's BERTopic with CustomTokenizer for Korean text.
 import numpy as np
 from typing import List, Dict, Any, Optional
 from datetime import datetime
+from io import BytesIO
+import matplotlib
+import matplotlib.pyplot as plt
+import matplotlib.font_manager as fm
 from bertopic import BERTopic
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
@@ -15,6 +19,36 @@ from src.models.database import get_db_connection
 from src.utils.logger import setup_logger
 
 logger = setup_logger()
+
+# Configure Korean font for matplotlib
+def setup_korean_font():
+    """Setup Korean font (NanumGothic) for matplotlib."""
+    try:
+        # Try to find NanumGothic font
+        font_path = None
+        for font in fm.findSystemFonts(fontpaths=None, fontext='ttf'):
+            if 'NanumGothic' in font or 'Nanum' in font:
+                font_path = font
+                break
+
+        if font_path:
+            font_prop = fm.FontProperties(fname=font_path)
+            plt.rcParams['font.family'] = font_prop.get_name()
+            logger.info(f"Korean font configured: {font_prop.get_name()}")
+        else:
+            # Fallback: use sans-serif
+            plt.rcParams['font.family'] = 'sans-serif'
+            logger.warning("NanumGothic font not found, using default font")
+
+        # Configure matplotlib to handle negative signs properly
+        plt.rcParams['axes.unicode_minus'] = False
+
+    except Exception as e:
+        logger.warning(f"Failed to setup Korean font: {e}")
+        plt.rcParams['font.family'] = 'sans-serif'
+
+# Setup font on module import
+setup_korean_font()
 
 
 def calculate_cosine_similarity(embedding1: np.ndarray, embedding2: np.ndarray) -> float:
@@ -278,6 +312,9 @@ def run_bertopic_clustering(
 
         total_topics = len([t for t in topics if t['topic_id'] != -1])
 
+        # Assign topic ranks based on article count (most articles = rank 1)
+        topics = assign_topic_ranks_by_article_count(topics)
+
         # Determine news_date
         if news_date:
             result_date = news_date
@@ -317,3 +354,121 @@ def get_article_news_date(article_id: int) -> Optional[datetime.date]:
     from src.models.database import ArticleRepository
     article = ArticleRepository.get_by_id(article_id)
     return article['news_date'] if article else None
+
+
+def assign_topic_ranks_by_article_count(topics: List[Dict]) -> List[Dict]:
+    """
+    Assign topic ranks based on article count (most articles = rank 1).
+
+    Args:
+        topics: List of topics from BERTopic clustering
+
+    Returns:
+        Same topics list with topic_rank and cluster_score added
+    """
+    # Separate outliers from valid topics
+    outlier_topics = [t for t in topics if t['topic_id'] == -1]
+    valid_topics = [t for t in topics if t['topic_id'] != -1]
+
+    # Sort by article count (descending: most articles first)
+    valid_topics.sort(key=lambda x: x['article_count'], reverse=True)
+
+    # Assign ranks to top 10 topics
+    for rank, topic in enumerate(valid_topics[:10], start=1):
+        topic['topic_rank'] = rank
+        # cluster_score = article_count (can be normalized if needed)
+        topic['cluster_score'] = float(topic['article_count'])
+
+    # Topics beyond top 10 don't get a rank
+    for topic in valid_topics[10:]:
+        topic['topic_rank'] = None
+        topic['cluster_score'] = float(topic['article_count'])
+
+    # Combine back with outliers
+    return valid_topics + outlier_topics
+
+
+def generate_topic_visualization(
+    news_date: Optional[datetime.date] = None,
+    limit: int = 200,
+    min_topic_size: int = 5,
+    nr_topics: str = "auto",
+    dpi: int = 150,
+    width: int = 1400,
+    height: int = 1400
+) -> bytes:
+    """
+    Generate DataMapPlot visualization of BERTopic clustering.
+
+    Args:
+        news_date: Optional date to filter articles
+        limit: Maximum number of articles
+        min_topic_size: Minimum articles per topic
+        nr_topics: Number of topics ("auto" or integer)
+        dpi: Image resolution (default: 150)
+        width: Figure width in pixels (default: 1400)
+        height: Figure height in pixels (default: 1400)
+
+    Returns:
+        PNG image as bytes
+
+    Raises:
+        ValueError: If not enough data for visualization
+    """
+    logger.info(f"Generating topic visualization (news_date={news_date}, limit={limit})")
+
+    try:
+        # Fetch articles with embeddings
+        articles, embeddings, doc_texts = fetch_articles_with_embeddings(news_date, limit)
+
+        if not articles or embeddings is None:
+            raise ValueError("No articles with embeddings found")
+
+        if len(articles) < min_topic_size:
+            raise ValueError(f"Not enough articles for visualization ({len(articles)} < {min_topic_size})")
+
+        logger.info(f"Visualizing {len(articles)} articles")
+
+        # Create BERTopic model (same configuration as clustering)
+        topic_model = BERTopic(
+            language="multilingual",
+            nr_topics=nr_topics,
+            min_topic_size=min_topic_size,
+            top_n_words=10,
+            calculate_probabilities=False,
+            verbose=False
+        )
+
+        # Fit and transform with pre-computed embeddings
+        topic_assignments, _ = topic_model.fit_transform(doc_texts, embeddings=embeddings)
+
+        logger.info(f"Clustering complete. Generating DataMapPlot visualization...")
+
+        # Generate DataMapPlot visualization with Korean font
+        # Note: matplotlib rcParams already configured with NanumGothic font
+        # DataMapPlot should inherit from matplotlib settings
+        fig = topic_model.visualize_document_datamap(
+            docs=doc_texts,
+            embeddings=embeddings,
+            reduced_embeddings=None,  # Let BERTopic handle UMAP reduction
+            custom_labels=True,  # Use custom topic labels from keywords
+            width=width,
+            height=height,
+            title="",  # No title
+            datamap_kwds={
+                "font_family": "NanumGothic",  # Use Korean font name (not path)
+            }
+        )
+
+        # Save figure to BytesIO
+        buf = BytesIO()
+        fig.savefig(buf, format='png', dpi=dpi, bbox_inches='tight')
+        buf.seek(0)
+
+        logger.info("Visualization generated successfully")
+
+        return buf.getvalue()
+
+    except Exception as e:
+        logger.error(f"Visualization generation failed: {e}", exc_info=True)
+        raise

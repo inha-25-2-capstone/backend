@@ -50,3 +50,8 @@ mypy==1.13.0
 # CORS
 python-multipart==0.0.18
 scikit-learn==1.7.2
+
+# Topic Modeling & Visualization
+bertopic==0.17.3
+datamapplot==0.4.1
+matplotlib==3.9.3

@@ -263,24 +263,29 @@ def bertopic_clustering_task(self, news_date_str: str = None, limit: int = 200):
                     main_article_id = topic['article_ids'][0] if topic['article_ids'] else None
                     centroid = topic.get('centroid')  # Get centroid embedding
                     similarity_scores = topic.get('similarity_scores', {})  # Get similarity scores dict
+                    topic_rank = topic.get('topic_rank')  # Get rank (1-10 or None)
+                    cluster_score = topic.get('cluster_score')  # Get cluster score
 
-                    logger.info(f"Saving Topic {topic['topic_id']}: {topic_title} ({article_count} articles)")
+                    logger.info(f"Saving Topic {topic['topic_id']}: {topic_title} (Rank {topic_rank}, {article_count} articles)")
 
                     # Prepare centroid embedding for DB (pgvector format)
                     centroid_str = None
                     if centroid:
                         centroid_str = '[' + ','.join(map(str, centroid)) + ']'
 
-                    # Insert topic with centroid
+                    # Insert topic with centroid, rank, and cluster score
+                    # Note: article_count is manually managed (triggers removed)
                     cursor.execute(
                         """
                         INSERT INTO topic (
-                            topic_date, topic_title, main_article_id, article_count, centroid_embedding, created_at
+                            topic_date, topic_title, main_article_id, article_count,
+                            topic_rank, cluster_score, centroid_embedding, created_at
                         )
-                        VALUES (%s, %s, %s, %s, %s, NOW())
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
                         RETURNING topic_id
                         """,
-                        (result_date, topic_title, main_article_id, article_count, centroid_str)
+                        (result_date, topic_title, main_article_id, article_count,
+                         topic_rank, cluster_score, centroid_str)
                     )
 
                     db_topic_id = cursor.fetchone()[0]

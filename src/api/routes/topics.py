@@ -2,6 +2,7 @@
 Topics API endpoints.
 """
 from fastapi import APIRouter, HTTPException, Query, status
+from fastapi.responses import Response
 from typing import Optional, List
 from datetime import datetime, date
 import logging
@@ -20,6 +21,7 @@ from src.api.schemas import (
     StanceType,
 )
 from src.models.database import get_db_cursor
+from src.services.bertopic_service import generate_topic_visualization
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +93,7 @@ async def get_topics(
                 FROM topic t
                 LEFT JOIN article a ON t.main_article_id = a.article_id
                 WHERE t.topic_date = %s AND t.is_active = TRUE
-                ORDER BY COALESCE(t.topic_rank, 999), t.article_count DESC
+                ORDER BY t.topic_rank ASC NULLS LAST, t.cluster_score DESC
                 LIMIT %s OFFSET %s
                 """,
                 (target_date, limit, offset)
@@ -147,6 +149,83 @@ async def get_topics(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to fetch topics"
+        )
+
+
+@router.get(
+    "/visualization",
+    response_class=Response,
+    status_code=status.HTTP_200_OK,
+    summary="Get topic visualization",
+    description="Generate DataMapPlot visualization of BERTopic clustering",
+    responses={
+        200: {
+            "content": {"image/png": {}},
+            "description": "PNG image of topic clustering visualization"
+        },
+        400: {"description": "Bad request (not enough data)"},
+        500: {"description": "Internal server error"}
+    }
+)
+async def get_topic_visualization(
+    date_filter: Optional[date] = Query(None, alias="date", description="Filter by date (YYYY-MM-DD)"),
+    limit: int = Query(200, ge=10, le=1000, description="Number of articles to visualize"),
+    dpi: int = Query(150, ge=50, le=300, description="Image resolution (DPI)"),
+):
+    """
+    Generate and return DataMapPlot visualization of topic clustering.
+
+    This endpoint runs BERTopic clustering on articles from the database and
+    generates a DataMapPlot visualization showing how articles are clustered
+    into topics.
+
+    Args:
+        date_filter: Filter articles by specific date (default: today)
+        limit: Maximum number of articles to visualize (default: 200)
+        dpi: Image resolution in DPI (default: 150)
+
+    Returns:
+        PNG image with Content-Type: image/png and 1-hour cache control
+
+    Note:
+        - Generates visualization on-the-fly (may take 10-30 seconds)
+        - Cached for 1 hour to improve performance
+        - Requires at least 5 articles with embeddings
+    """
+    try:
+        logger.info(f"Generating visualization (date={date_filter}, limit={limit})")
+
+        # Generate visualization
+        image_bytes = generate_topic_visualization(
+            news_date=date_filter,
+            limit=limit,
+            dpi=dpi,
+            width=1400,
+            height=1400
+        )
+
+        # Return image with cache control headers
+        return Response(
+            content=image_bytes,
+            media_type="image/png",
+            headers={
+                "Cache-Control": "public, max-age=3600",  # Cache for 1 hour
+                "Content-Disposition": f'inline; filename="topic_visualization_{date_filter or "latest"}.png"'
+            }
+        )
+
+    except ValueError as e:
+        # Not enough data for visualization
+        logger.warning(f"Visualization failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"Error generating visualization: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to generate visualization"
         )
 
 
@@ -411,3 +490,5 @@ async def get_topic_articles(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to fetch topic articles"
         )
+
+
