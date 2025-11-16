@@ -124,7 +124,7 @@ databases:
   - name: politics-news-db
     databaseName: politics_news
     region: singapore
-    plan: starter
+    plan: free
     postgresMajorVersion: "18"
     # IMPORTANT: After deployment, manually enable pgvector extension:
     # 1. Connect via PSQL (Dashboard → Connect → PSQL Command)
