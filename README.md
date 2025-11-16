@@ -9,7 +9,9 @@ Backend service for Korean political news aggregation and analysis system.
 - **BERTopic Clustering**: Backend sklearn clustering with pre-computed embeddings ⭐
 - **Real Cosine Similarity**: Article-topic similarity calculation (0.33-0.93 range) ⭐
 - **Topic Centroids**: Stored in DB for ranking and recommendation ⭐
+- **Topic Visualization**: DataMapPlot API with Korean font support (NanumGothic) ⭐
 - **1시간 파이프라인**: Scraping → AI Processing → BERTopic (Celery Chain) ⭐
+- **FastAPI Endpoints**: Topics, Articles, Press, Visualization APIs ⭐
 - **Database**: PostgreSQL with pgvector extension for similarity search
 - **Task Queue**: Celery + Redis for async processing
 - **Migrations**: Alembic for version-controlled schema management
@@ -17,11 +19,14 @@ Backend service for Korean political news aggregation and analysis system.
 ## 📋 Tech Stack
 
 - **Python 3.12** with virtual environment
-- **FastAPI 0.119.0** - REST API framework (TODO)
+- **FastAPI 0.119.0** - REST API framework ✅
 - **PostgreSQL 16** + **pgvector** - Vector database
 - **Redis** - Task queue & caching
 - **Celery** - Async task processing
 - **Selenium 4.35.0** - Web scraping
+- **BERTopic 0.17.3** - Topic modeling ⭐
+- **DataMapPlot 0.4.1** - Visualization ⭐
+- **matplotlib 3.9.3** - Korean font rendering (NanumGothic) ⭐
 - **scikit-learn** - ML clustering
 - **Alembic 1.13.2** - Database migrations
 
@@ -41,7 +46,7 @@ Backend service for Korean political news aggregation and analysis system.
                             ▼
                     ┌──────────────┐
                     │   FastAPI    │
-                    │ (TODO)       │
+                    │ (REST API)   │
                     └──────────────┘
 ```
 
@@ -318,25 +323,35 @@ git push origin main
 - ✅ TypeScript types and Mock data
 - ✅ CI/CD pipeline (GitHub Actions)
 
+### ✅ Phase 4: FastAPI Endpoints - COMPLETED ⭐
+- `GET /health` - Health check
+- `GET /api/topics` - Topic list (Top 7 for main page)
+- `GET /api/topics/{topic_id}` - Topic detail
+- `GET /api/topics/{topic_id}/articles` - Articles by topic (with stance filter)
+- `GET /api/topics/visualization` - BERTopic DataMapPlot visualization (PNG) ⭐
+- `GET /api/articles` - All articles (with filters)
+- `GET /api/articles/{article_id}` - Article detail
+- `GET /api/press` - Press list
+- `GET /api/press/{press_id}/articles` - Articles by press
+
+**Visualization API Features**:
+- Korean font support (NanumGothic)
+- 1400x1400 px PNG image
+- Configurable DPI (50-300)
+- 1-hour caching (Cache-Control)
+- Date and limit filtering
+
 ### 🚧 In Progress
 
 - None
 
 ### 📋 TODO (Next Priority)
 
-- ⏭️ Phase 4: Stance Analysis (waiting for ML model)
-- ⏭️ **Phase 5: FastAPI Endpoints (HIGH PRIORITY)**
-  - `GET /health` - Health check
-  - `GET /api/topics` - Topic list (Top 7 for main page)
-  - `GET /api/topics/{topic_id}` - Topic detail
-  - `GET /api/topics/{topic_id}/articles` - Articles by topic (with stance filter)
-  - `GET /api/articles` - All articles (with filters)
-  - `GET /api/articles/{article_id}` - Article detail
-  - `GET /api/press` - Press list
-  - `GET /api/press/{press_id}/articles` - Articles by press
+- ⏭️ Phase 5: Stance Analysis (waiting for ML model)
+- ⏭️ **Phase 6: Recommendation Engine (HIGH PRIORITY)**
   - `GET /api/topics/{topic_id}/recommendations` - Recommended articles (top 3 per stance)
-- ⏭️ Recommendation Engine (top 3 per stance)
-- ⏭️ Frontend Integration
+  - Implement recommendation algorithm using similarity scores
+- ⏭️ Frontend-Backend Integration
 
 ## 🧪 Testing
 

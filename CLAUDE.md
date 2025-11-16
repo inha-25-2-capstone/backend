@@ -8,7 +8,7 @@ Backend development guide for Political News Aggregation System.
 
 **Architecture**: Hybrid cloud - Render (backend + BERTopic) + HF Spaces (AI service) + Redis (task queue)
 
-**Current Status (2025-11-13)**:
+**Current Status (2025-11-15)**:
 - ✅ BERTopic clustering with Title+Summary embeddings ⭐
 - ✅ Real cosine similarity calculation (article ↔ topic centroid) ⭐
 - ✅ Topic centroids stored in DB for ranking ⭐
@@ -16,6 +16,7 @@ Backend development guide for Political News Aggregation System.
 - ✅ Backend-based clustering (sklearn BERTopic) ⭐
 - ✅ Verified: 0.33-0.93 similarity range (8 topics) ⭐
 - ✅ **FastAPI endpoints** (Health, Topics, Articles, Press) ⭐
+- ✅ **BERTopic Visualization API** (DataMapPlot with Korean font support) ⭐
 - ✅ **API testing** completed with real data (1,041 articles, 8 topics) ⭐
 - ✅ Frontend structure (React 19 + TypeScript + TanStack Query in front/ folder) ⭐
 - ⏳ Recommendation Engine (next priority)
@@ -26,7 +27,8 @@ Backend development guide for Political News Aggregation System.
 - **Backend**: FastAPI 0.119.0, Celery, PostgreSQL 16 + pgvector, Redis
 - **AI Service**: Deployed on HF Spaces (https://zedwrkc-news-stance-detection.hf.space)
 - **Scraping**: Selenium 4.35.0 + BeautifulSoup4
-- **Clustering**: BERTopic (sklearn-based, backend) ⭐
+- **Clustering**: BERTopic 0.17.3 (sklearn-based, backend) ⭐
+- **Visualization**: DataMapPlot 0.4.1 + matplotlib 3.9.3 (Korean font: NanumGothic) ⭐
 - **Database Migrations**: Alembic 1.13.2
 - **Python**: 3.12
 
@@ -54,7 +56,7 @@ backend/
 │   │   └── tasks.py              # AI processing + BERTopic clustering tasks
 │   ├── services/                 # Business logic ✅
 │   │   ├── ai_client.py          # AI service client (summary + embedding)
-│   │   └── bertopic_service.py   # BERTopic clustering (sklearn) ⭐
+│   │   └── bertopic_service.py   # BERTopic clustering + visualization (sklearn + DataMapPlot) ⭐
 │   ├── models/                   # Database layer ✅
 │   │   └── database.py
 │   └── utils/
@@ -315,6 +317,11 @@ python scripts/migrate.py down
 - Topics API (list, detail, articles by topic)
 - Articles API (list, detail with multiple filters)
 - Press API (list, articles by press)
+- **Visualization API** (BERTopic clustering visualization) ⭐
+  - GET `/api/topics/visualization` - DataMapPlot PNG image
+  - Korean font support (NanumGothic)
+  - 1400x1400 px, configurable DPI
+  - 1-hour caching (Cache-Control)
 - Pydantic schemas with Optional stance fields
 - CORS configuration for frontend (ports 5173, 3000)
 - Pagination support (offset/limit)
@@ -325,6 +332,7 @@ python scripts/migrate.py down
 - `src/api/main.py` (FastAPI app + CORS)
 - `src/api/routes/` (health, topics, articles, press)
 - `src/api/schemas/` (common, responses)
+- `src/services/bertopic_service.py` (visualization function)
 - `scripts/run_api.py` (API startup script)
 
 ### ⏳ Phase 5: Stance Analysis - TODO
