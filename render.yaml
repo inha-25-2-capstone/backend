@@ -2,18 +2,18 @@ services:
   # FastAPI Web Service
   - type: web
     name: politics-news-api
-    env: python
-    runtime: python-3.12.0
+    runtime: python
     region: singapore
     plan: starter
-    buildCommand: pip install --upgrade pip && pip install -r requirements.txt && python scripts/migrate.py up
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    preDeployCommand: python scripts/migrate.py up
     startCommand: uvicorn src.api.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
     envVars:
       - key: ENVIRONMENT
         value: production
       - key: PYTHONUNBUFFERED
-        value: 1
+        value: "1"
       - key: LOG_LEVEL
         value: INFO
       - key: DATABASE_URL
@@ -28,9 +28,9 @@ services:
       - key: AI_SERVICE_URL
         sync: false
       - key: AI_SERVICE_TIMEOUT
-        value: 120
+        value: "120"
       - key: AI_SERVICE_BATCH_SIZE
-        value: 50
+        value: "50"
       - key: CORS_ORIGINS
         sync: false
       - key: API_PREFIX
@@ -39,8 +39,7 @@ services:
   # Celery Background Worker
   - type: worker
     name: politics-news-worker
-    env: python
-    runtime: python-3.12.0
+    runtime: python
     region: singapore
     plan: starter
     buildCommand: pip install --upgrade pip && pip install -r requirements.txt
@@ -49,7 +48,7 @@ services:
       - key: ENVIRONMENT
         value: production
       - key: PYTHONUNBUFFERED
-        value: 1
+        value: "1"
       - key: LOG_LEVEL
         value: INFO
       - key: DATABASE_URL
@@ -74,21 +73,20 @@ services:
       - key: AI_SERVICE_URL
         sync: false
       - key: AI_SERVICE_TIMEOUT
-        value: 120
+        value: "120"
       - key: AI_SERVICE_BATCH_SIZE
-        value: 50
+        value: "50"
       - key: CELERY_RESULT_EXPIRES
-        value: 3600
+        value: "3600"
       - key: CELERY_TASK_ACKS_LATE
-        value: true
+        value: "true"
       - key: CELERY_WORKER_PREFETCH_MULTIPLIER
-        value: 1
+        value: "1"
 
   # Cron Job: Full Pipeline (Scraping + AI + BERTopic) - every hour
   - type: cron
     name: politics-news-full-pipeline
-    env: python
-    runtime: python-3.12.0
+    runtime: python
     region: singapore
     schedule: "0 * * * *"
     buildCommand: pip install --upgrade pip && pip install -r requirements.txt
@@ -97,7 +95,7 @@ services:
       - key: ENVIRONMENT
         value: production
       - key: PYTHONUNBUFFERED
-        value: 1
+        value: "1"
       - key: LOG_LEVEL
         value: INFO
       - key: DATABASE_URL
@@ -110,11 +108,11 @@ services:
           type: redis
           property: connectionString
       - key: SCRAPER_DELAY
-        value: 2
+        value: "2"
       - key: SCRAPER_MAX_ARTICLES
-        value: 1000
+        value: "1000"
       - key: SCRAPER_HEADLESS
-        value: true
+        value: "true"
       - key: TIMEZONE
         value: Asia/Seoul
       - key: AI_SERVICE_URL
@@ -127,16 +125,21 @@ databases:
     databaseName: politics_news
     region: singapore
     plan: starter
-    postgresMajorVersion: 18
+    postgresMajorVersion: "18"
     # IMPORTANT: After deployment, manually enable pgvector extension:
     # 1. Connect via PSQL (Dashboard → Connect → PSQL Command)
     # 2. Run: CREATE EXTENSION IF NOT EXISTS vector;
     # 3. Verify: \dx
 
 # Redis for Celery and Task Queue
-# IMPORTANT: Redis must be created separately BEFORE Blueprint deployment:
-# 1. Dashboard → New → Redis
-# 2. Name: politics-news-redis
-# 3. Region: Singapore (same as services)
-# 4. Plan: Free (25MB, allkeys-lru policy)
-# 5. Then Blueprint will reference it using fromService above
+# Option 1: Use Blueprint-managed Redis (recommended)
+# Uncomment the section below to let Blueprint create Redis automatically
+# Option 2: Create Redis manually in Dashboard first (current setup)
+#
+# services:
+#   - type: keyvalue
+#     name: politics-news-redis
+#     region: singapore
+#     plan: free
+#     maxmemoryPolicy: allkeys-lru
+#     ipAllowList: []  # Allow connections only from Render services
