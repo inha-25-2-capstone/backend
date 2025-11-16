@@ -3,9 +3,10 @@ services:
   - type: web
     name: politics-news-api
     env: python
+    runtime: python-3.12.0
     region: singapore
     plan: starter
-    buildCommand: pip install -r requirements.txt && python scripts/migrate.py up
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt && python scripts/migrate.py up
     startCommand: uvicorn src.api.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
     envVars:
@@ -27,7 +28,7 @@ services:
       - key: AI_SERVICE_URL
         sync: false
       - key: AI_SERVICE_TIMEOUT
-        value: 30
+        value: 120
       - key: AI_SERVICE_BATCH_SIZE
         value: 50
       - key: CORS_ORIGINS
@@ -39,9 +40,10 @@ services:
   - type: worker
     name: politics-news-worker
     env: python
+    runtime: python-3.12.0
     region: singapore
     plan: starter
-    buildCommand: pip install -r requirements.txt
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
     startCommand: celery -A src.workers.celery_app worker --loglevel=info
     envVars:
       - key: ENVIRONMENT
@@ -72,17 +74,24 @@ services:
       - key: AI_SERVICE_URL
         sync: false
       - key: AI_SERVICE_TIMEOUT
-        value: 30
+        value: 120
       - key: AI_SERVICE_BATCH_SIZE
         value: 50
+      - key: CELERY_RESULT_EXPIRES
+        value: 3600
+      - key: CELERY_TASK_ACKS_LATE
+        value: true
+      - key: CELERY_WORKER_PREFETCH_MULTIPLIER
+        value: 1
 
   # Cron Job: Full Pipeline (Scraping + AI + BERTopic) - every hour
   - type: cron
     name: politics-news-full-pipeline
     env: python
+    runtime: python-3.12.0
     region: singapore
     schedule: "0 * * * *"
-    buildCommand: pip install -r requirements.txt
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
     startCommand: python scripts/run_full_pipeline.py
     envVars:
       - key: ENVIRONMENT
@@ -118,9 +127,16 @@ databases:
     databaseName: politics_news
     region: singapore
     plan: starter
-    postgresMajorVersion: 16
-    # Note: pgvector extension is automatically enabled by Alembic migration
+    postgresMajorVersion: 18
+    # IMPORTANT: After deployment, manually enable pgvector extension:
+    # 1. Connect via PSQL (Dashboard → Connect → PSQL Command)
+    # 2. Run: CREATE EXTENSION IF NOT EXISTS vector;
+    # 3. Verify: \dx
 
 # Redis for Celery and Task Queue
-# Note: Redis needs to be created separately in Render Dashboard
-# Then reference it using fromService in envVars above
+# IMPORTANT: Redis must be created separately BEFORE Blueprint deployment:
+# 1. Dashboard → New → Redis
+# 2. Name: politics-news-redis
+# 3. Region: Singapore (same as services)
+# 4. Plan: Free (25MB, allkeys-lru policy)
+# 5. Then Blueprint will reference it using fromService above
