@@ -86,13 +86,11 @@ services:
   # Cron Job: Full Pipeline (Scraping + AI + BERTopic) - every hour
   - type: cron
     name: politics-news-full-pipeline
-    runtime: python
+    runtime: docker
     region: singapore
     schedule: "0 * * * *"
-    buildCommand: |
-      apt-get update && apt-get install -y chromium chromium-driver &&
-      pip install --upgrade pip && pip install --no-cache-dir -r requirements-prod.txt
-    startCommand: python scripts/run_full_pipeline.py
+    dockerfilePath: ./Dockerfile
+    dockerCommand: python scripts/run_full_pipeline.py
     envVars:
       - key: ENVIRONMENT
         value: production
