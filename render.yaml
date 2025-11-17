@@ -4,7 +4,7 @@ services:
     name: politics-news-api
     runtime: python
     region: singapore
-    plan: starter
+    plan: standard  # 2GB RAM (required for ML libraries)
     buildCommand: pip install --upgrade pip && pip install --no-cache-dir -r requirements-prod.txt
     preDeployCommand: python scripts/migrate.py up
     startCommand: uvicorn src.api.main:app --host 0.0.0.0 --port $PORT
