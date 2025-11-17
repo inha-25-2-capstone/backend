@@ -28,7 +28,7 @@ if not DATABASE_URL:
     raise ValueError("DATABASE_URL이 설정되지 않았습니다.")
 
 # AI Service Configuration
-AI_SERVICE_URL = os.getenv("AI_SERVICE_URL", "https://zedwrkc-news-stance-detection.hf.space")
+AI_SERVICE_URL = os.getenv("AI_SERVICE_URL", "https://gaaahee-news-stance-detection.hf.space")
 AI_SERVICE_TIMEOUT = int(os.getenv("AI_SERVICE_TIMEOUT", "120"))
 
 # Redis Configuration

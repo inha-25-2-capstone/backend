@@ -25,7 +25,7 @@ Backend development guide for Political News Aggregation System.
 ## Technology Stack
 
 - **Backend**: FastAPI 0.119.0, Celery, PostgreSQL 16 + pgvector, Redis
-- **AI Service**: Deployed on HF Spaces (https://zedwrkc-news-stance-detection.hf.space)
+- **AI Service**: Deployed on HF Spaces (https://gaaahee-news-stance-detection.hf.space)
 - **Scraping**: Selenium 4.35.0 + BeautifulSoup4
 - **Clustering**: BERTopic 0.17.3 (sklearn-based, backend) ⭐
 - **Visualization**: DataMapPlot 0.4.1 + matplotlib 3.9.3 (Korean font: NanumGothic) ⭐
@@ -141,7 +141,7 @@ Top 3 articles per stance using similarity scores
 
 ## AI Service Integration
 
-**Deployed URL**: https://zedwrkc-news-stance-detection.hf.space
+**Deployed URL**: https://gaaahee-news-stance-detection.hf.space
 
 **Key Endpoint**: `POST /batch-process-articles`
 - Input: List of {article_id, title, content} ⭐ title 추가
@@ -152,7 +152,7 @@ Top 3 articles per stance using similarity scores
 
 **Key Change**: Embedding now generated from "Title + Summary" instead of just "Summary" ⭐
 
-**Documentation**: https://zedwrkc-news-stance-detection.hf.space/docs
+**Documentation**: https://gaaahee-news-stance-detection.hf.space/docs
 
 ## Environment Configuration
 
@@ -166,7 +166,7 @@ DB_PASSWORD=postgres
 
 REDIS_URL=redis://localhost:6379/0
 
-AI_SERVICE_URL=https://zedwrkc-news-stance-detection.hf.space
+AI_SERVICE_URL=https://gaaahee-news-stance-detection.hf.space
 AI_SERVICE_TIMEOUT=120
 ```
 
@@ -174,7 +174,7 @@ AI_SERVICE_TIMEOUT=120
 ```bash
 DATABASE_URL=<auto-injected>
 REDIS_URL=<auto-injected>
-AI_SERVICE_URL=https://zedwrkc-news-stance-detection.hf.space
+AI_SERVICE_URL=https://gaaahee-news-stance-detection.hf.space
 AI_SERVICE_TIMEOUT=120
 ```
 
@@ -387,7 +387,7 @@ python scripts/migrate.py down
 
 ---
 
-**For detailed API specs**: See AI service docs at https://zedwrkc-news-stance-detection.hf.space/docs
+**For detailed API specs**: See AI service docs at https://gaaahee-news-stance-detection.hf.space/docs
 
 **Current Focus**:
 - Backend: FastAPI Endpoints Implementation (Phase 1-3)

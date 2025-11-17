@@ -14,7 +14,7 @@ from src.utils.logger import setup_logger
 logger = setup_logger()
 
 # AI Service configuration from environment
-AI_SERVICE_URL = os.getenv("AI_SERVICE_URL", "https://zedwrkc-news-stance-detection.hf.space")
+AI_SERVICE_URL = os.getenv("AI_SERVICE_URL", "https://gaaahee-news-stance-detection.hf.space")
 AI_SERVICE_TIMEOUT = int(os.getenv("AI_SERVICE_TIMEOUT", "120"))
 
 # Redis client for batch coordination
