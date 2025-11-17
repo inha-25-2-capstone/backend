@@ -81,6 +81,7 @@ class NaverNewsScraper:
 
         # Set Chrome/Chromium binary location for Render deployment
         # Render apt.txt installs chromium to /usr/bin/chromium
+        chromedriver_path = None
         if os.path.exists("/usr/bin/chromium"):
             options.binary_location = "/usr/bin/chromium"
             logger.info("Using Chromium binary from /usr/bin/chromium")
@@ -88,11 +89,27 @@ class NaverNewsScraper:
             options.binary_location = "/usr/bin/chromium-browser"
             logger.info("Using Chromium binary from /usr/bin/chromium-browser")
 
+        # Use system chromedriver if available (matches chromium version)
+        if os.path.exists("/usr/bin/chromedriver"):
+            chromedriver_path = "/usr/bin/chromedriver"
+            logger.info("Using system ChromeDriver from /usr/bin/chromedriver")
+        elif os.path.exists("/usr/lib/chromium-browser/chromedriver"):
+            chromedriver_path = "/usr/lib/chromium-browser/chromedriver"
+            logger.info("Using system ChromeDriver from /usr/lib/chromium-browser/")
+
         try:
-            self.driver = webdriver.Chrome(
-                service=Service(ChromeDriverManager().install()),
-                options=options
-            )
+            # Use system chromedriver if found, otherwise use webdriver-manager
+            if chromedriver_path:
+                self.driver = webdriver.Chrome(
+                    service=Service(chromedriver_path),
+                    options=options
+                )
+            else:
+                # Fallback to webdriver-manager (for local development)
+                self.driver = webdriver.Chrome(
+                    service=Service(ChromeDriverManager().install()),
+                    options=options
+                )
             logger.info("Chrome driver setup complete (headless mode: %s)", self.headless)
         except WebDriverException as e:
             logger.error(f"Failed to setup Chrome driver: {e}")
