@@ -89,7 +89,9 @@ services:
     runtime: python
     region: singapore
     schedule: "0 * * * *"
-    buildCommand: pip install --upgrade pip && pip install --no-cache-dir -r requirements-prod.txt
+    buildCommand: |
+      apt-get update && apt-get install -y chromium chromium-driver &&
+      pip install --upgrade pip && pip install --no-cache-dir -r requirements-prod.txt
     startCommand: python scripts/run_full_pipeline.py
     envVars:
       - key: ENVIRONMENT
