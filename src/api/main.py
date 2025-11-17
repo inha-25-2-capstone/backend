@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from contextlib import asynccontextmanager
 import logging
+import os
 from datetime import datetime
 
 from src.models.database import init_connection_pool, close_connection_pool
@@ -48,13 +49,15 @@ app = FastAPI(
 )
 
 # CORS middleware
+# Get CORS origins from environment variable or use defaults
+cors_origins = os.getenv(
+    "CORS_ORIGINS",
+    "http://localhost:5173,http://localhost:3000"
+).split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",  # Frontend development server
-        "http://localhost:3000",  # Alternative frontend port
-        # Add production frontend URL when ready
-    ],
+    allow_origins=[origin.strip() for origin in cors_origins],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

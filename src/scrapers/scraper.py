@@ -3,6 +3,7 @@ Naver News Scraper for Political News
 
 Scrapes Korean political news from Naver News and saves to database.
 """
+import os
 import time
 import requests
 from bs4 import BeautifulSoup
@@ -77,6 +78,15 @@ class NaverNewsScraper:
             "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
         )
+
+        # Set Chrome/Chromium binary location for Render deployment
+        # Render apt.txt installs chromium to /usr/bin/chromium
+        if os.path.exists("/usr/bin/chromium"):
+            options.binary_location = "/usr/bin/chromium"
+            logger.info("Using Chromium binary from /usr/bin/chromium")
+        elif os.path.exists("/usr/bin/chromium-browser"):
+            options.binary_location = "/usr/bin/chromium-browser"
+            logger.info("Using Chromium binary from /usr/bin/chromium-browser")
 
         try:
             self.driver = webdriver.Chrome(
