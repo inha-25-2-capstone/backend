@@ -6,6 +6,8 @@ Scrapes Korean political news from Naver News and saves to database.
 import os
 import time
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from bs4 import BeautifulSoup
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, List
@@ -56,6 +58,7 @@ class NaverNewsScraper:
         self.headless = headless
         self.delay = delay
         self.driver = None
+        self.session = None  # HTTP session for article fetching
         self.stats = {
             "total_scraped": 0,
             "total_saved": 0,
@@ -115,11 +118,35 @@ class NaverNewsScraper:
             logger.error(f"Failed to setup Chrome driver: {e}")
             raise
 
+    def _setup_session(self):
+        """Setup HTTP session with retry logic for article fetching."""
+        logger.info("Setting up HTTP session with retry logic...")
+
+        # Configure retry strategy
+        retry_strategy = Retry(
+            total=3,  # Maximum number of retries
+            backoff_factor=1,  # Wait 1s, 2s, 4s between retries
+            status_forcelist=[429, 500, 502, 503, 504],  # Retry on these HTTP status codes
+            allowed_methods=["GET"]  # Only retry GET requests
+        )
+
+        # Create session with retry adapter
+        self.session = requests.Session()
+        adapter = HTTPAdapter(max_retries=retry_strategy)
+        self.session.mount("http://", adapter)
+        self.session.mount("https://", adapter)
+
+        logger.info("HTTP session setup complete (max retries: 3)")
+
     def _close_driver(self):
-        """Close the WebDriver."""
+        """Close the WebDriver and HTTP session."""
         if self.driver:
             self.driver.quit()
             logger.info("Chrome driver closed")
+
+        if self.session:
+            self.session.close()
+            logger.info("HTTP session closed")
 
     def _get_today_date_str(self) -> str:
         """
@@ -188,7 +215,8 @@ class NaverNewsScraper:
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                               "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
             }
-            response = requests.get(url, headers=headers, timeout=10)
+            # Use session with retry logic and increased timeout (30 seconds)
+            response = self.session.get(url, headers=headers, timeout=30)
             response.raise_for_status()
 
             soup = BeautifulSoup(response.text, "html.parser")
@@ -401,6 +429,7 @@ class NaverNewsScraper:
 
         try:
             self._setup_driver()
+            self._setup_session()
 
             for press_name, press_id in press_companies.items():
                 article_ids = self.scrape_press(press_name, press_id, target_date)
