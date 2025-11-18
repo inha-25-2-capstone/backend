@@ -113,7 +113,7 @@ python scripts/migrate.py current
 
 ```bash
 # Terminal 1: Start Celery worker
-celery -A src.workers.celery_app worker --loglevel=info
+celery -A src.workers.celery_app worker --loglevel=info --concurrency=4  # 4 workers recommended ⭐
 
 # Terminal 2: Run 1시간 pipeline (scraping + AI + BERTopic) ⭐
 python scripts/run_full_pipeline.py
@@ -217,7 +217,7 @@ python scripts/run_scraper.py
 python scripts/process_all_articles.py
 
 # Start Celery worker
-celery -A src.workers.celery_app worker --loglevel=info
+celery -A src.workers.celery_app worker --loglevel=info --concurrency=4  # 4 workers recommended ⭐
 
 # Run tests
 pytest tests/
@@ -239,13 +239,40 @@ flake8 src/
 - `DB_USER` - Database user
 - `DB_PASSWORD` - Database password
 - `REDIS_URL` - Redis connection URL
-- `AI_SERVICE_URL` - AI service endpoint
+- `AI_SERVICE_URL` - AI service endpoint (e.g., https://gaaahee-news-stance-detection.hf.space)
+- `AI_SERVICE_TIMEOUT` - AI service timeout in seconds (default: 240) ⭐
 
 ### Optional (BERTopic Clustering) ⭐
 
 - `BERTOPIC_MIN_TOPIC_SIZE` - Minimum articles per topic (default: 5)
 - `BERTOPIC_NR_TOPICS` - Number of topics (default: "auto")
 - `BERTOPIC_TOP_N_WORDS` - Keywords per topic (default: 10)
+
+## ⚡ Production Optimizations
+
+### Scraper Reliability ⭐
+- **HTTP Session with Retry**: 3 retries with exponential backoff (1s, 2s, 4s)
+- **Timeout**: 30 seconds per article request
+- **Connection Pooling**: Reuses connections for better performance
+- **Error Recovery**: Continues scraping even if individual articles fail
+
+### AI Processing Performance ⭐
+- **Client Timeout**: 240 seconds (handles slow HF Spaces responses)
+- **Batch Size**: 5 articles per request (optimal for HF Spaces)
+- **Retry Logic**: 3 attempts with 2-second backoff
+- **Warmup**: Automatic HF Spaces cold start handling
+
+### Celery Worker Configuration ⭐
+- **Concurrency**: 4 workers (prevents HF Spaces API overload)
+- **Prefetch Multiplier**: 1 (process one task at a time)
+- **Max Tasks Per Child**: 50 (restart worker after 50 tasks to prevent memory leaks)
+- **Redis Pool Limit**: 10 connections (prevents "max clients reached" error on Redis free tier)
+- **Broker Retry**: Enabled on startup failures
+
+### Database Performance
+- **pgvector**: Indexed vector similarity search
+- **Connection Pooling**: SQLAlchemy connection pool
+- **Batch Operations**: Bulk inserts for embeddings and topics
 
 ## 🚢 Deployment (Render)
 
@@ -277,18 +304,35 @@ git push origin main
 
 ### Render Services
 
-- **Web Service**: FastAPI backend (TODO)
-- **Background Worker**: Celery worker
-- **Cron Job**:
-  - **1시간 주기**: Full Pipeline (Scraping → AI → BERTopic → Stance) ⭐
+- **politics-news-api**: FastAPI backend ⭐
+  - Plan: Standard (2GB RAM for ML libraries)
+  - Endpoint: https://politics-news-api.onrender.com
+- **politics-news-worker**: Celery background worker ⭐
+  - Plan: Starter (512MB, 4 workers with concurrency limit)
+  - Handles AI processing and BERTopic clustering tasks
+- **politics-news-full-pipeline**: Cron Job ⭐
+  - Schedule: Every hour (0 * * * *)
+  - Runtime: Docker (for Chromium support)
+  - Tasks: Scraping → AI → BERTopic
+- **PostgreSQL**: Database with pgvector extension
+  - Plan: Free (1GB storage)
+- **Redis**: Task queue and caching
+  - Plan: Free (25MB, 50 connections)
 
-## 📊 Current Status (2025-11-12)
+## 📊 Current Status (2025-11-18)
+
+### ✅ Production Deployment Complete
+
+- **Deployed on Render**: All services running (API, Worker, Cron, PostgreSQL, Redis)
+- **Optimizations Applied**: Scraper retry logic, Celery concurrency control, Redis pool limit
+- **1시간 Pipeline**: Automated hourly news collection and processing
+- **API Endpoints**: Health, Topics, Articles, Press, Visualization (DataMapPlot)
 
 ### 📈 Recent Verification
 
-- **Articles Processed**: 200 articles with embeddings
-- **AI Processing**: Batch size 50, ~30-50s per batch
-- **Topics Created**: 8 topics for 2025-11-11
+- **Articles Processed**: 1,041 articles with embeddings
+- **AI Processing**: 5-article batches, ~60s per batch, 240s timeout
+- **Topics Created**: 8 topics for 2025-11-17
   1. 대장동 항소 포기 (82 articles, avg similarity: 0.649)
   2. 대통령은 11일 국무회의에서 (28 articles, avg similarity: 0.673)
   3. tf 12 공직자 (25 articles, avg similarity: 0.706)

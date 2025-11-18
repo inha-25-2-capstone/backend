@@ -8,7 +8,7 @@ Backend development guide for Political News Aggregation System.
 
 **Architecture**: Hybrid cloud - Render (backend + BERTopic) + HF Spaces (AI service) + Redis (task queue)
 
-**Current Status (2025-11-15)**:
+**Current Status (2025-11-18)**:
 - ✅ BERTopic clustering with Title+Summary embeddings ⭐
 - ✅ Real cosine similarity calculation (article ↔ topic centroid) ⭐
 - ✅ Topic centroids stored in DB for ranking ⭐
@@ -18,6 +18,7 @@ Backend development guide for Political News Aggregation System.
 - ✅ **FastAPI endpoints** (Health, Topics, Articles, Press) ⭐
 - ✅ **BERTopic Visualization API** (DataMapPlot with Korean font support) ⭐
 - ✅ **API testing** completed with real data (1,041 articles, 8 topics) ⭐
+- ✅ **Production optimizations** (Scraper retry logic, Celery concurrency control, Redis pool limit) ⭐
 - ✅ Frontend structure (React 19 + TypeScript + TanStack Query in front/ folder) ⭐
 - ⏳ Recommendation Engine (next priority)
 - ⏳ Stance analysis (model training in progress)
@@ -147,7 +148,7 @@ Top 3 articles per stance using similarity scores
 - Input: List of {article_id, title, content} ⭐ title 추가
 - Output: {summary, embedding(768-dim from title+summary)} ⭐
 - Batch size: Up to 50 articles
-- Timeout: 120 seconds
+- **Client Timeout**: 240 seconds (increased for reliability) ⭐
 - **Warmup**: Automatic HF Spaces cold start handling (60s timeout, 3 retries)
 
 **Key Change**: Embedding now generated from "Title + Summary" instead of just "Summary" ⭐
@@ -167,7 +168,7 @@ DB_PASSWORD=postgres
 REDIS_URL=redis://localhost:6379/0
 
 AI_SERVICE_URL=https://gaaahee-news-stance-detection.hf.space
-AI_SERVICE_TIMEOUT=120
+AI_SERVICE_TIMEOUT=240  # Increased for reliability ⭐
 ```
 
 ### Production (Render Dashboard)
@@ -175,7 +176,7 @@ AI_SERVICE_TIMEOUT=120
 DATABASE_URL=<auto-injected>
 REDIS_URL=<auto-injected>
 AI_SERVICE_URL=https://gaaahee-news-stance-detection.hf.space
-AI_SERVICE_TIMEOUT=120
+AI_SERVICE_TIMEOUT=240  # Set in render.yaml ⭐
 ```
 
 ## Local Development Quick Start
@@ -195,7 +196,7 @@ docker compose up -d  # PostgreSQL + Redis
 python scripts/init_db.py
 
 # 4. Start Celery worker (in separate terminal)
-celery -A src.workers.celery_app worker --loglevel=info
+celery -A src.workers.celery_app worker --loglevel=info --concurrency=4  # 4 workers for optimal performance ⭐
 
 # 5. Run 1시간 pipeline (recommended) ⭐
 python scripts/run_full_pipeline.py
@@ -244,15 +245,26 @@ python scripts/migrate.py down
 - Content validation: Min 20 characters
 - Duplicate checking by URL
 - Auto-enqueues AI processing tasks
+- **HTTP Session with Retry**: Max 3 retries with backoff (1s, 2s, 4s) ⭐
+- **Timeout**: 30 seconds per article request (increased for reliability) ⭐
+- **Connection Pooling**: Reuses HTTP connections for better performance ⭐
 
 ### AI Processing
 - Celery task: `process_articles_batch(article_ids)`
 - Retry logic: Max 3 retries with exponential backoff
 - Task timeout: 10 minutes
-- Batch size: 50 articles
+- Batch size: 50 articles (sent as 5-article batches to HF Spaces)
+- **Client Timeout**: 240 seconds (handles slow HF Spaces responses) ⭐
 - HF Spaces warmup: Automatic cold start handling
 - **Embedding**: Generated from Title + Summary (768-dim) ⭐
 - Stance field: Currently `null` (model not ready)
+
+### Celery Worker Configuration ⭐
+- **Concurrency**: 4 workers (prevents HF Spaces overload)
+- **Prefetch Multiplier**: 1 (process one task at a time)
+- **Max Tasks Per Child**: 50 (restart worker after 50 tasks)
+- **Redis Connection Pool**: 10 connections (prevents Redis "max clients" error)
+- **Broker Retry**: Enabled on startup failures
 
 ### BERTopic Clustering ⭐
 - **Location**: Backend (not HF Spaces)
@@ -378,12 +390,23 @@ python scripts/migrate.py down
 - Environment variables
 - Service configuration
 - Cron jobs (1-hour full pipeline) ⭐
+- **Production Optimizations**: ⭐
+  - Celery concurrency: 4 workers (prevents HF Spaces overload)
+  - AI timeout: 240 seconds (handles slow responses)
+  - Redis pool: 10 connections (prevents "max clients" error)
 
 **Manual steps**:
 1. Push to GitHub
 2. Connect repository in Render Dashboard
-3. Configure environment variables
+3. Configure environment variables (especially `AI_SERVICE_URL` without trailing slash)
 4. Deploy
+
+**Production Configuration**:
+- **politics-news-api**: Standard plan (2GB RAM for ML libraries)
+- **politics-news-worker**: Starter plan (4 workers, 512MB)
+- **politics-news-full-pipeline**: Docker runtime (Chromium support)
+- **PostgreSQL**: Free plan with pgvector extension
+- **Redis**: Free plan (50 connections, 25MB)
 
 ---
 

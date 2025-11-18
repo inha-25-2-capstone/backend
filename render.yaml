@@ -28,7 +28,7 @@ services:
       - key: AI_SERVICE_URL
         sync: false
       - key: AI_SERVICE_TIMEOUT
-        value: "120"
+        value: "240"
       - key: AI_SERVICE_BATCH_SIZE
         value: "50"
       - key: CORS_ORIGINS
@@ -43,7 +43,7 @@ services:
     region: singapore
     plan: starter
     buildCommand: pip install --upgrade pip && pip install --no-cache-dir -r requirements-prod.txt
-    startCommand: celery -A src.workers.celery_app worker --loglevel=info
+    startCommand: celery -A src.workers.celery_app worker --loglevel=info --concurrency=4
     envVars:
       - key: ENVIRONMENT
         value: production
@@ -73,7 +73,7 @@ services:
       - key: AI_SERVICE_URL
         sync: false
       - key: AI_SERVICE_TIMEOUT
-        value: "120"
+        value: "240"
       - key: AI_SERVICE_BATCH_SIZE
         value: "50"
       - key: CELERY_RESULT_EXPIRES

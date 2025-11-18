@@ -31,6 +31,8 @@ celery_app.conf.update(
     task_acks_late=True,  # Acknowledge task after completion
     worker_prefetch_multiplier=1,  # Process one task at a time
     worker_max_tasks_per_child=50,  # Restart worker after 50 tasks
+    broker_pool_limit=10,  # Limit Redis connections (important for free tier: 50 max)
+    broker_connection_retry_on_startup=True,  # Retry on startup connection failures
 )
 
 logger.info(f"Celery app initialized with broker: {REDIS_URL}")
