@@ -183,6 +183,161 @@ class AIServiceClient:
         logger.error(f"Batch processing failed after {self.max_retries} attempts")
         raise last_exception
 
+    def cluster_topics(
+        self,
+        embeddings: List[List[float]],
+        texts: List[str],
+        article_ids: List[int],
+        news_date: str,
+        min_topic_size: int = 5,
+        nr_topics: str = "auto"
+    ) -> Dict[str, Any]:
+        """
+        Call HF Spaces BERTopic clustering API.
+
+        Args:
+            embeddings: List of 768-dim embeddings
+            texts: List of "title. summary" strings
+            article_ids: List of article IDs
+            news_date: YYYY-MM-DD format
+            min_topic_size: Minimum articles per topic
+            nr_topics: "auto" or integer
+
+        Returns:
+            {
+                'success': bool,
+                'topics': List[topic_dict],
+                'total_topics': int,
+                'total_articles': int,
+                'outliers': int,
+                'news_date': str
+            }
+        """
+        # Ensure service is warmed up
+        if not self._warmed_up:
+            if not self.warmup():
+                raise ConnectionError("AI service is not available")
+
+        logger.info(f"Calling HF Spaces BERTopic clustering API for {news_date} ({len(article_ids)} articles)")
+
+        payload = {
+            "embeddings": embeddings,
+            "texts": texts,
+            "article_ids": article_ids,
+            "news_date": news_date,
+            "min_topic_size": min_topic_size,
+            "nr_topics": nr_topics
+        }
+
+        last_exception = None
+        for attempt in range(1, self.max_retries + 1):
+            try:
+                logger.debug(f"BERTopic clustering attempt {attempt}/{self.max_retries}")
+
+                response = self.session.post(
+                    f"{self.base_url}/cluster-topics",
+                    json=payload,
+                    timeout=self.timeout,
+                    headers={"Content-Type": "application/json"}
+                )
+                response.raise_for_status()
+
+                result = response.json()
+
+                logger.info(
+                    f"BERTopic clustering complete: {result.get('total_topics', 0)} topics "
+                    f"from {result.get('total_articles', 0)} articles"
+                )
+
+                return result
+
+            except requests.Timeout as e:
+                last_exception = e
+                logger.warning(f"BERTopic clustering attempt {attempt} timed out: {e}")
+
+            except requests.RequestException as e:
+                last_exception = e
+                logger.warning(f"BERTopic clustering attempt {attempt} failed: {e}")
+
+            if attempt < self.max_retries:
+                backoff_time = 2 ** attempt
+                logger.info(f"Retrying in {backoff_time} seconds...")
+                time.sleep(backoff_time)
+
+        logger.error(f"BERTopic clustering failed after {self.max_retries} attempts")
+        raise last_exception
+
+    def generate_topic_visualization(
+        self,
+        embeddings: List[List[float]],
+        texts: List[str],
+        news_date: str,
+        dpi: int = 150,
+        width: int = 1400,
+        height: int = 1400
+    ) -> bytes:
+        """
+        Call HF Spaces visualization generation API.
+
+        Args:
+            embeddings: List of 768-dim embeddings
+            texts: List of "title. summary" strings
+            news_date: YYYY-MM-DD format
+            dpi: Image resolution (50-300)
+            width: Figure width in pixels
+            height: Figure height in pixels
+
+        Returns:
+            PNG image bytes
+        """
+        # Ensure service is warmed up
+        if not self._warmed_up:
+            if not self.warmup():
+                raise ConnectionError("AI service is not available")
+
+        logger.info(f"Calling HF Spaces visualization API for {news_date} ({len(texts)} articles)")
+
+        payload = {
+            "embeddings": embeddings,
+            "texts": texts,
+            "news_date": news_date,
+            "dpi": dpi,
+            "width": width,
+            "height": height
+        }
+
+        last_exception = None
+        for attempt in range(1, self.max_retries + 1):
+            try:
+                logger.debug(f"Visualization generation attempt {attempt}/{self.max_retries}")
+
+                response = self.session.post(
+                    f"{self.base_url}/generate-topic-visualization",
+                    json=payload,
+                    timeout=self.timeout,
+                    headers={"Content-Type": "application/json"}
+                )
+                response.raise_for_status()
+
+                logger.info("Visualization generated successfully")
+                return response.content
+
+            except requests.Timeout as e:
+                last_exception = e
+                logger.warning(f"Visualization attempt {attempt} timed out: {e}")
+
+            except requests.RequestException as e:
+                last_exception = e
+                logger.warning(f"Visualization attempt {attempt} failed: {e}")
+
+            if attempt < self.max_retries:
+                backoff_time = 2 ** attempt
+                logger.info(f"Retrying in {backoff_time} seconds...")
+                time.sleep(backoff_time)
+
+        logger.error(f"Visualization generation failed after {self.max_retries} attempts")
+        raise last_exception
+
     def close(self):
         """Close HTTP session"""
         self.session.close()

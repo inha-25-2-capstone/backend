@@ -11,7 +11,8 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./database/postgre_schema.sql:/docker-entrypoint-initdb.d/init.sql
+      # Commented out: Use Alembic migrations instead of init.sql
+      # - ./database/postgre_schema.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 10s

@@ -21,7 +21,9 @@ from src.api.schemas import (
     StanceType,
 )
 from src.models.database import get_db_cursor
-from src.services.bertopic_service import generate_topic_visualization
+from src.services.bertopic_service import fetch_articles_with_embeddings
+from src.services.ai_client import create_ai_client
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -195,14 +197,31 @@ async def get_topic_visualization(
     try:
         logger.info(f"Generating visualization (date={date_filter}, limit={limit})")
 
-        # Generate visualization
-        image_bytes = generate_topic_visualization(
-            news_date=date_filter,
-            limit=limit,
-            dpi=dpi,
-            width=1400,
-            height=1400
-        )
+        # Fetch articles with embeddings from DB
+        articles, embeddings, doc_texts = fetch_articles_with_embeddings(date_filter, limit)
+
+        if not articles or embeddings is None:
+            raise ValueError("No articles with embeddings found")
+
+        if len(articles) < 5:
+            raise ValueError(f"Not enough articles for visualization ({len(articles)} < 5)")
+
+        logger.info(f"Sending {len(articles)} articles to HF Spaces for visualization")
+
+        # Get AI service configuration
+        AI_SERVICE_URL = os.getenv("AI_SERVICE_URL", "https://gaaahee-news-stance-detection.hf.space")
+        AI_SERVICE_TIMEOUT = int(os.getenv("AI_SERVICE_TIMEOUT", "240"))
+
+        # Call HF Spaces visualization API
+        with create_ai_client(base_url=AI_SERVICE_URL, timeout=AI_SERVICE_TIMEOUT) as ai_client:
+            image_bytes = ai_client.generate_topic_visualization(
+                embeddings=embeddings.tolist(),
+                texts=doc_texts,
+                news_date=str(date_filter or datetime.now().date()),
+                dpi=dpi,
+                width=1400,
+                height=1400
+            )
 
         # Return image with cache control headers
         return Response(

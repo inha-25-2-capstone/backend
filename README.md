@@ -6,10 +6,10 @@ Backend service for Korean political news aggregation and analysis system.
 
 - **News Scraping**: Automated scraping from 6 major Korean news sources (1시간 주기) ⭐
 - **AI Processing**: Summarization + 768-dim embedding (Title+Summary) via HF Spaces ⭐
-- **BERTopic Clustering**: Backend sklearn clustering with pre-computed embeddings ⭐
+- **BERTopic Clustering**: HF Spaces sklearn clustering with pre-computed embeddings ⭐
 - **Real Cosine Similarity**: Article-topic similarity calculation (0.33-0.93 range) ⭐
-- **Topic Centroids**: Stored in DB for ranking and recommendation ⭐
-- **Topic Visualization**: DataMapPlot API with Korean font support (NanumGothic) ⭐
+- **Topic Centroids**: Computed in HF Spaces, stored in DB for ranking ⭐
+- **Topic Visualization**: DataMapPlot API (HF Spaces) with Korean font support ⭐
 - **1시간 파이프라인**: Scraping → AI Processing → BERTopic (Celery Chain) ⭐
 - **FastAPI Endpoints**: Topics, Articles, Press, Visualization APIs ⭐
 - **Database**: PostgreSQL with pgvector extension for similarity search
@@ -24,11 +24,8 @@ Backend service for Korean political news aggregation and analysis system.
 - **Redis** - Task queue & caching
 - **Celery** - Async task processing
 - **Selenium 4.35.0** - Web scraping
-- **BERTopic 0.17.3** - Topic modeling ⭐
-- **DataMapPlot 0.4.1** - Visualization ⭐
-- **matplotlib 3.9.3** - Korean font rendering (NanumGothic) ⭐
-- **scikit-learn** - ML clustering
 - **Alembic 1.13.2** - Database migrations
+- **HF Spaces**: BERTopic 0.17.3, DataMapPlot 0.4.1, matplotlib (Korean fonts) ⭐
 
 ## 🏗️ Architecture
 
@@ -58,13 +55,14 @@ Backend service for Korean political news aggregation and analysis system.
    - **AI Processing** (Celery Task) → Summary + Embedding (Title+Summary, 768-dim) → DB
      - Batch size: 50 articles
      - HF Spaces warmup handling
-   - **BERTopic Clustering** (Celery Task, Backend) → sklearn clustering with DB embeddings → Save topics ⭐
-     - CustomTokenizer for Korean text
-     - CountVectorizer + c-TF-IDF
-     - Auto topic detection (min_topic_size=5)
-     - **Calculate topic centroids** (mean of article embeddings) ⭐
-     - **Calculate real cosine similarity** (article ↔ centroid) ⭐
-     - Save centroid_embedding and similarity_scores to DB ⭐
+   - **BERTopic Clustering** (Celery Task, HF Spaces) → sklearn clustering with DB embeddings → Save topics ⭐
+     - Backend: Fetch embeddings from DB → Send to HF Spaces API
+     - HF Spaces: CustomTokenizer for Korean text
+     - HF Spaces: CountVectorizer + c-TF-IDF
+     - HF Spaces: Auto topic detection (min_topic_size=5)
+     - HF Spaces: **Calculate topic centroids** (mean of article embeddings) ⭐
+     - HF Spaces: **Calculate real cosine similarity** (article ↔ centroid) ⭐
+     - Backend: Save centroid_embedding and similarity_scores to DB ⭐
 
 ### TODO
 3. **Stance Analysis** (Celery Task) → Topic-based 옹호/중립/비판 classification
@@ -139,8 +137,8 @@ backend/
 │   ├── scrapers/               # Naver News scraper ✅
 │   ├── workers/                # Celery tasks ✅
 │   ├── services/               # Business logic ✅
-│   │   ├── bertopic_service.py # BERTopic clustering (backend) ⭐
-│   │   └── ai_client.py        # AI service client
+│   │   ├── bertopic_service.py # Helper functions (clustering moved to HF Spaces) ⭐
+│   │   └── ai_client.py        # AI service client (summary + embedding + BERTopic) ⭐
 │   ├── models/                 # Database layer ✅
 │   ├── utils/                  # Utilities ✅
 │   └── config.py               # Configuration ✅
@@ -242,11 +240,9 @@ flake8 src/
 - `AI_SERVICE_URL` - AI service endpoint (e.g., https://gaaahee-news-stance-detection.hf.space)
 - `AI_SERVICE_TIMEOUT` - AI service timeout in seconds (default: 240) ⭐
 
-### Optional (BERTopic Clustering) ⭐
+### Optional
 
-- `BERTOPIC_MIN_TOPIC_SIZE` - Minimum articles per topic (default: 5)
-- `BERTOPIC_NR_TOPICS` - Number of topics (default: "auto")
-- `BERTOPIC_TOP_N_WORDS` - Keywords per topic (default: 10)
+- None (BERTopic parameters are now configured in HF Spaces) ⭐
 
 ## ⚡ Production Optimizations
 
@@ -305,11 +301,12 @@ git push origin main
 ### Render Services
 
 - **politics-news-api**: FastAPI backend ⭐
-  - Plan: Standard (2GB RAM for ML libraries)
+  - Plan: Starter (512MB RAM, BERTopic moved to HF Spaces) ⭐
   - Endpoint: https://politics-news-api.onrender.com
+  - **Cost Savings**: $18/month ($25 → $7) ⭐
 - **politics-news-worker**: Celery background worker ⭐
   - Plan: Starter (512MB, 4 workers with concurrency limit)
-  - Handles AI processing and BERTopic clustering tasks
+  - Handles AI processing coordination (clustering runs on HF Spaces) ⭐
 - **politics-news-full-pipeline**: Cron Job ⭐
   - Schedule: Every hour (0 * * * *)
   - Runtime: Docker (for Chromium support)
@@ -352,10 +349,11 @@ git push origin main
 **Backend**:
 - ✅ Phase 1: News Collection (Scraper + DB integration)
 - ✅ Phase 2: Backend-AI Integration (Celery + AI client with HF Spaces warmup)
-- ✅ Phase 3: BERTopic Clustering (sklearn backend with Title+Summary embeddings) ⭐
+- ✅ Phase 3: BERTopic Clustering (sklearn HF Spaces with Title+Summary embeddings) ⭐
   - ✅ Real cosine similarity calculation (article ↔ topic centroid) ⭐
-  - ✅ Topic centroids stored in DB (for ranking/recommendation) ⭐
+  - ✅ Topic centroids computed in HF Spaces, stored in Backend DB ⭐
   - ✅ Verified: 0.33-0.93 similarity range (2025-11-11, 8 topics) ⭐
+  - ✅ **Memory optimization**: Moved from Backend (512MB) to HF Spaces (16GB) ⭐
 - ✅ 1시간 Pipeline (Scraping → AI → BERTopic with Similarity) ⭐
 - ✅ Database Migrations (Alembic)
 

@@ -8,18 +8,20 @@ Backend development guide for Political News Aggregation System.
 
 **Architecture**: Hybrid cloud - Render (backend + BERTopic) + HF Spaces (AI service) + Redis (task queue)
 
-**Current Status (2025-11-18)**:
+**Current Status (2025-11-20)**:
 - ✅ BERTopic clustering with Title+Summary embeddings ⭐
 - ✅ Real cosine similarity calculation (article ↔ topic centroid) ⭐
 - ✅ Topic centroids stored in DB for ranking ⭐
 - ✅ 1시간 파이프라인 (Scraping → AI → BERTopic with Similarity) ⭐
-- ✅ Backend-based clustering (sklearn BERTopic) ⭐
+- ✅ HF Spaces-based clustering (sklearn BERTopic) ⭐
 - ✅ Verified: 0.33-0.93 similarity range (8 topics) ⭐
 - ✅ **FastAPI endpoints** (Health, Topics, Articles, Press) ⭐
 - ✅ **BERTopic Visualization API** (DataMapPlot with Korean font support) ⭐
 - ✅ **API testing** completed with real data (1,041 articles, 8 topics) ⭐
 - ✅ **Production optimizations** (Scraper retry logic, Celery concurrency control, Redis pool limit) ⭐
 - ✅ Frontend structure (React 19 + TypeScript + TanStack Query in front/ folder) ⭐
+- ✅ **HF Spaces stability** (memory management, psutil monitoring) ⭐
+- ✅ **AI_SERVICE_TIMEOUT** increased to 600s for reliability ⭐
 - ⏳ Recommendation Engine (next priority)
 - ⏳ Stance analysis (model training in progress)
 
@@ -28,8 +30,8 @@ Backend development guide for Political News Aggregation System.
 - **Backend**: FastAPI 0.119.0, Celery, PostgreSQL 16 + pgvector, Redis
 - **AI Service**: Deployed on HF Spaces (https://gaaahee-news-stance-detection.hf.space)
 - **Scraping**: Selenium 4.35.0 + BeautifulSoup4
-- **Clustering**: BERTopic 0.17.3 (sklearn-based, backend) ⭐
-- **Visualization**: DataMapPlot 0.4.1 + matplotlib 3.9.3 (Korean font: NanumGothic) ⭐
+- **Clustering**: BERTopic 0.17.3 (sklearn-based, HF Spaces) ⭐
+- **Visualization**: DataMapPlot 0.4.1 + matplotlib 3.9.3 (HF Spaces) ⭐
 - **Database Migrations**: Alembic 1.13.2
 - **Python**: 3.12
 
@@ -56,8 +58,8 @@ backend/
 │   │   ├── celery_app.py
 │   │   └── tasks.py              # AI processing + BERTopic clustering tasks
 │   ├── services/                 # Business logic ✅
-│   │   ├── ai_client.py          # AI service client (summary + embedding)
-│   │   └── bertopic_service.py   # BERTopic clustering + visualization (sklearn + DataMapPlot) ⭐
+│   │   ├── ai_client.py          # AI service client (summary + embedding + BERTopic clustering) ⭐
+│   │   └── bertopic_service.py   # Helper functions for data fetching (clustering moved to HF Spaces) ⭐
 │   ├── models/                   # Database layer ✅
 │   │   └── database.py
 │   └── utils/
@@ -116,15 +118,16 @@ Phase 2: AI Processing (Celery Task) ✅
    ├─ Batch size: 50 articles
    └─ Save to DB: UPDATE article SET summary, embedding
             ↓
-Phase 3: BERTopic Clustering (Celery Task, Backend) ⭐ ✅
-   Fetch embeddings from DB → sklearn BERTopic clustering
-   ├─ Input: Stored embeddings (768-dim)
+Phase 3: BERTopic Clustering (Celery Task, HF Spaces) ⭐ ✅
+   Backend: Fetch embeddings from DB → Send to HF Spaces API
+   HF Spaces: BERTopic clustering with CustomTokenizer
+   ├─ Input: Embeddings (768-dim) + texts from Backend
    ├─ CustomTokenizer for Korean text (regex-based)
    ├─ CountVectorizer + c-TF-IDF
    ├─ Auto topic detection (min_topic_size=5)
    ├─ Calculate topic centroids (mean of embeddings) ⭐
    ├─ Calculate real cosine similarity (article ↔ centroid) ⭐
-   └─ Save to DB: topic (with centroid), topic_article_mapping (with similarity) ⭐
+   └─ Return results to Backend → Save to DB ⭐
             ↓
 Phase 4: FastAPI Endpoints ⭐ ✅
    Health, Topics, Articles, Press APIs
@@ -168,7 +171,7 @@ DB_PASSWORD=postgres
 REDIS_URL=redis://localhost:6379/0
 
 AI_SERVICE_URL=https://gaaahee-news-stance-detection.hf.space
-AI_SERVICE_TIMEOUT=240  # Increased for reliability ⭐
+AI_SERVICE_TIMEOUT=600  # Increased for HF Spaces stability ⭐
 ```
 
 ### Production (Render Dashboard)
@@ -267,15 +270,16 @@ python scripts/migrate.py down
 - **Broker Retry**: Enabled on startup failures
 
 ### BERTopic Clustering ⭐
-- **Location**: Backend (not HF Spaces)
+- **Location**: HF Spaces (not Backend) ⭐
 - **Algorithm**: sklearn BERTopic with CustomTokenizer
-- **Input**: Pre-computed embeddings from DB
+- **Input**: Pre-computed embeddings from Backend DB
 - **Frequency**: Every 1 hour (after AI processing)
 - **Min topic size**: 5 articles
 - **Tokenizer**: Regex-based Korean text processing
 - **Similarity**: Real cosine similarity (article ↔ centroid, 0.33-0.93) ⭐
-- **Centroids**: Stored in topic.centroid_embedding ⭐
+- **Centroids**: Computed in HF Spaces, stored in Backend DB ⭐
 - **Output**: Topic titles from top 3 c-TF-IDF keywords
+- **Memory**: 16GB available on HF Spaces (vs 512MB on Worker)
 
 ### 1시간 Pipeline ⭐
 - **Cron job**: Runs every hour on Render
@@ -402,11 +406,12 @@ python scripts/migrate.py down
 4. Deploy
 
 **Production Configuration**:
-- **politics-news-api**: Standard plan (2GB RAM for ML libraries)
+- **politics-news-api**: Starter plan (512MB RAM, no ML libraries) ⭐
 - **politics-news-worker**: Starter plan (4 workers, 512MB)
 - **politics-news-full-pipeline**: Docker runtime (Chromium support)
 - **PostgreSQL**: Free plan with pgvector extension
 - **Redis**: Free plan (50 connections, 25MB)
+- **Cost Savings**: $18/month ($32 → $14) by moving BERTopic to HF Spaces ⭐
 
 ---
 

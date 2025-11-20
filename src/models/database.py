@@ -18,16 +18,30 @@ _connection_pool: Optional[SimpleConnectionPool] = None
 
 
 def init_connection_pool(minconn: int = 1, maxconn: int = 10):
-    """Initialize the database connection pool."""
+    """Initialize the database connection pool with keepalive settings."""
     global _connection_pool
     if _connection_pool is None:
         try:
+            # Parse DATABASE_URL and add keepalive parameters
+            import urllib.parse
+            parsed = urllib.parse.urlparse(DATABASE_URL)
+
+            # Build connection string with keepalive
+            conn_params = {
+                'keepalives': 1,
+                'keepalives_idle': 30,
+                'keepalives_interval': 10,
+                'keepalives_count': 5,
+                'connect_timeout': 10
+            }
+
             _connection_pool = SimpleConnectionPool(
                 minconn,
                 maxconn,
-                DATABASE_URL
+                DATABASE_URL,
+                **conn_params
             )
-            logger.info(f"Database connection pool initialized (min={minconn}, max={maxconn})")
+            logger.info(f"Database connection pool initialized (min={minconn}, max={maxconn}, keepalive enabled)")
         except Exception as e:
             logger.error(f"Failed to initialize connection pool: {e}")
             raise
@@ -45,7 +59,7 @@ def close_connection_pool():
 @contextmanager
 def get_db_connection():
     """
-    Context manager for database connections.
+    Context manager for database connections with retry logic.
 
     Usage:
         with get_db_connection() as conn:
@@ -57,16 +71,56 @@ def get_db_connection():
     if _connection_pool is None:
         init_connection_pool()
 
-    conn = _connection_pool.getconn()
-    try:
-        yield conn
-        conn.commit()
-    except Exception as e:
-        conn.rollback()
-        logger.error(f"Database error: {e}")
-        raise
-    finally:
-        _connection_pool.putconn(conn)
+    max_retries = 3
+    retry_delay = 0.5  # Start with 500ms
+
+    for attempt in range(max_retries):
+        conn = None
+        try:
+            conn = _connection_pool.getconn()
+            # Test connection with a simple query
+            with conn.cursor() as test_cur:
+                test_cur.execute("SELECT 1")
+
+            yield conn
+            conn.commit()
+            break  # Success, exit retry loop
+
+        except (psycopg2.OperationalError, psycopg2.InterfaceError) as e:
+            # Connection-related errors - retry
+            if conn:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass  # Connection already closed
+                try:
+                    _connection_pool.putconn(conn, close=True)  # Force close bad connection
+                except Exception:
+                    pass
+                conn = None
+
+            if attempt < max_retries - 1:
+                import time
+                time.sleep(retry_delay)
+                retry_delay *= 2  # Exponential backoff
+                logger.warning(f"DB connection error (attempt {attempt + 1}/{max_retries}): {e}. Retrying...")
+            else:
+                logger.error(f"DB connection failed after {max_retries} attempts: {e}")
+                raise
+
+        except Exception as e:
+            # Other errors - don't retry
+            if conn:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+            logger.error(f"Database error: {e}")
+            raise
+
+        finally:
+            if conn:
+                _connection_pool.putconn(conn)
 
 
 @contextmanager

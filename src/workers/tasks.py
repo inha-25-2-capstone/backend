@@ -204,8 +204,9 @@ def bertopic_clustering_task(self, news_date_str: str = None, limit: int = 200):
         dict: Clustering results with topics saved to database
     """
     from datetime import datetime
-    from src.services.bertopic_service import run_bertopic_clustering
+    from src.services.bertopic_service import fetch_articles_with_embeddings
     from src.models.database import get_db_connection
+    from src.services.ai_client import create_ai_client
 
     try:
         # Parse date if provided
@@ -216,13 +217,33 @@ def bertopic_clustering_task(self, news_date_str: str = None, limit: int = 200):
         else:
             logger.info(f"Starting BERTopic clustering for recent {limit} articles")
 
-        # Run clustering
-        result = run_bertopic_clustering(
-            news_date=news_date,
-            limit=limit,
-            min_topic_size=5,
-            nr_topics="auto"
-        )
+        # Fetch articles with embeddings from DB
+        articles, embeddings, doc_texts = fetch_articles_with_embeddings(news_date, limit)
+
+        if not articles or embeddings is None:
+            logger.warning("No articles with embeddings found for BERTopic clustering")
+            return {
+                'success': False,
+                'error': 'No articles with embeddings found',
+                'total_articles': 0
+            }
+
+        # Prepare data for HF Spaces API
+        article_ids = [a['article_id'] for a in articles]
+        embeddings_list = embeddings.tolist()
+
+        logger.info(f"Sending {len(articles)} articles to HF Spaces for BERTopic clustering")
+
+        # Call HF Spaces BERTopic clustering API
+        with create_ai_client(base_url=AI_SERVICE_URL, timeout=AI_SERVICE_TIMEOUT) as ai_client:
+            result = ai_client.cluster_topics(
+                embeddings=embeddings_list,
+                texts=doc_texts,
+                article_ids=article_ids,
+                news_date=str(news_date or datetime.now().date()),
+                min_topic_size=5,
+                nr_topics="auto"
+            )
 
         if not result['success']:
             logger.warning(f"Clustering failed: {result.get('error')}")
@@ -266,6 +287,22 @@ def bertopic_clustering_task(self, news_date_str: str = None, limit: int = 200):
                     topic_rank = topic.get('topic_rank')  # Get rank (1-10 or None)
                     cluster_score = topic.get('cluster_score')  # Get cluster score
 
+                    # DEBUG: Check raw values from HF Spaces
+                    logger.info(f"RAW HF SPACES DATA - Topic {topic['topic_id']}: article_count={topic['article_count']}, cluster_score={cluster_score}, len(article_ids)={len(topic['article_ids'])}")
+
+                    # DEBUG: Log to check if similarity_scores is populated
+                    logger.info(f"DEBUG - Topic {topic['topic_id']}: article_count={article_count}, len(article_ids)={len(topic['article_ids'])}, similarity_scores count={len(similarity_scores)}")
+
+                    # DEBUG: Check similarity_scores keys type and sample values
+                    if similarity_scores:
+                        sample_keys = list(similarity_scores.keys())[:3]
+                        sample_items = {k: similarity_scores[k] for k in sample_keys}
+                        logger.info(f"DEBUG - similarity_scores sample: {sample_items}")
+                        logger.info(f"DEBUG - similarity_scores keys type: {type(sample_keys[0]) if sample_keys else 'N/A'}")
+
+                    # DEBUG: Log the actual article_ids to compare
+                    logger.info(f"DEBUG - First 3 article_ids from HF Spaces: {topic['article_ids'][:3]}")
+
                     logger.info(f"Saving Topic {topic['topic_id']}: {topic_title} (Rank {topic_rank}, {article_count} articles)")
 
                     # Prepare centroid embedding for DB (pgvector format)
@@ -275,6 +312,10 @@ def bertopic_clustering_task(self, news_date_str: str = None, limit: int = 200):
 
                     # Insert topic with centroid, rank, and cluster score
                     # Note: article_count is manually managed (triggers removed)
+
+                    # DEBUG: Log exact values being passed to INSERT
+                    logger.info(f"PRE-INSERT VALUES - Topic {topic['topic_id']}: article_count={article_count}, cluster_score={cluster_score}, topic_rank={topic_rank}")
+
                     cursor.execute(
                         """
                         INSERT INTO topic (
@@ -291,10 +332,16 @@ def bertopic_clustering_task(self, news_date_str: str = None, limit: int = 200):
                     db_topic_id = cursor.fetchone()[0]
                     topics_saved += 1
 
+                    # DEBUG: Verify what was actually saved
+                    cursor.execute("SELECT article_count, cluster_score FROM topic WHERE topic_id = %s", (db_topic_id,))
+                    saved_article_count, saved_cluster_score = cursor.fetchone()
+                    logger.info(f"VERIFY DB - Topic {db_topic_id}: INSERTED article_count={article_count}, cluster_score={cluster_score} → SAVED article_count={saved_article_count}, cluster_score={saved_cluster_score}")
+
                     # Insert topic-article mappings with real similarity scores
                     for article_id in topic['article_ids']:
                         # Get similarity score for this article (default to 1.0 if not found)
-                        similarity_score = similarity_scores.get(article_id, 1.0)
+                        # Note: HF Spaces returns string keys, so convert article_id to string
+                        similarity_score = similarity_scores.get(str(article_id), 1.0)
 
                         cursor.execute(
                             """
