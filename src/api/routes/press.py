@@ -57,7 +57,7 @@ async def get_all_press(
                     p.press_id,
                     p.press_name
                 FROM press p
-                ORDER BY p.press_name {sort_order}
+                ORDER BY p.press_name COLLATE "C" {sort_order}
             """
             cur.execute(query)
             press_list = cur.fetchall()

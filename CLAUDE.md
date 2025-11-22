@@ -20,8 +20,9 @@ Backend development guide for Political News Aggregation System.
 - ✅ **API testing** completed with real data (1,041 articles, 8 topics) ⭐
 - ✅ **Production optimizations** (Scraper retry logic, Celery concurrency control, Redis pool limit) ⭐
 - ✅ Frontend structure (React 19 + TypeScript + TanStack Query in front/ folder) ⭐
-- ✅ **HF Spaces stability** (memory management, psutil monitoring) ⭐
+- ✅ **HF Spaces stability** (memory management, psutil monitoring, pre-cleanup at >85%) ⭐
 - ✅ **AI_SERVICE_TIMEOUT** increased to 600s for reliability ⭐
+- ✅ **DB triggers removed** from both local and Render DB (article_count fix) ⭐
 - ⏳ Recommendation Engine (next priority)
 - ⏳ Stance analysis (model training in progress)
 

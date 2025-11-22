@@ -43,7 +43,7 @@ services:
     region: singapore
     plan: starter
     buildCommand: pip install --upgrade pip && pip install --no-cache-dir -r requirements-prod.txt
-    startCommand: celery -A src.workers.celery_app worker --loglevel=info --concurrency=4
+    startCommand: celery -A src.workers.celery_app worker --loglevel=info --concurrency=1
     envVars:
       - key: ENVIRONMENT
         value: production
