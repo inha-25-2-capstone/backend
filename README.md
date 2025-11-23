@@ -111,7 +111,7 @@ python scripts/migrate.py current
 
 ```bash
 # Terminal 1: Start Celery worker
-celery -A src.workers.celery_app worker --loglevel=info --concurrency=4  # 4 workers recommended ⭐
+celery -A src.workers.celery_app worker --loglevel=info --concurrency=1  # 1 worker (prevents HF Spaces overload) ⭐
 
 # Terminal 2: Run 1시간 pipeline (scraping + AI + BERTopic) ⭐
 python scripts/run_full_pipeline.py
@@ -215,7 +215,7 @@ python scripts/run_scraper.py
 python scripts/process_all_articles.py
 
 # Start Celery worker
-celery -A src.workers.celery_app worker --loglevel=info --concurrency=4  # 4 workers recommended ⭐
+celery -A src.workers.celery_app worker --loglevel=info --concurrency=1  # 1 worker (prevents HF Spaces overload) ⭐
 
 # Run tests
 pytest tests/
@@ -259,7 +259,7 @@ flake8 src/
 - **Warmup**: Automatic HF Spaces cold start handling
 
 ### Celery Worker Configuration ⭐
-- **Concurrency**: 4 workers (prevents HF Spaces API overload)
+- **Concurrency**: 1 worker (prevents HF Spaces overload, sequential processing)
 - **Prefetch Multiplier**: 1 (process one task at a time)
 - **Max Tasks Per Child**: 50 (restart worker after 50 tasks to prevent memory leaks)
 - **Redis Pool Limit**: 10 connections (prevents "max clients reached" error on Redis free tier)
@@ -305,7 +305,7 @@ git push origin main
   - Endpoint: https://politics-news-api.onrender.com
   - **Cost Savings**: $18/month ($25 → $7) ⭐
 - **politics-news-worker**: Celery background worker ⭐
-  - Plan: Starter (512MB, 4 workers with concurrency limit)
+  - Plan: Starter (512MB, 1 worker for sequential processing)
   - Handles AI processing coordination (clustering runs on HF Spaces) ⭐
 - **politics-news-full-pipeline**: Cron Job ⭐
   - Schedule: Every hour (0 * * * *)

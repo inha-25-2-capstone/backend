@@ -179,6 +179,26 @@ def _fetch_topic_articles(
         return True, total, articles
 
 
+def _call_visualization_api(
+    embeddings_list: List[List[float]],
+    doc_texts: List[str],
+    news_date: str,
+    dpi: int,
+    ai_service_url: str,
+    ai_service_timeout: int
+) -> bytes:
+    """Synchronous function to call HF Spaces visualization API."""
+    with create_ai_client(base_url=ai_service_url, timeout=ai_service_timeout) as ai_client:
+        return ai_client.generate_topic_visualization(
+            embeddings=embeddings_list,
+            texts=doc_texts,
+            news_date=news_date,
+            dpi=dpi,
+            width=1400,
+            height=1400
+        )
+
+
 @router.get(
     "",
     response_model=PaginatedResponse[TopicSummary],
@@ -338,16 +358,16 @@ async def get_topic_visualization(
         AI_SERVICE_URL = os.getenv("AI_SERVICE_URL", "https://gaaahee-news-stance-detection.hf.space")
         AI_SERVICE_TIMEOUT = int(os.getenv("AI_SERVICE_TIMEOUT", "240"))
 
-        # Call HF Spaces visualization API
-        with create_ai_client(base_url=AI_SERVICE_URL, timeout=AI_SERVICE_TIMEOUT) as ai_client:
-            image_bytes = ai_client.generate_topic_visualization(
-                embeddings=embeddings.tolist(),
-                texts=doc_texts,
-                news_date=str(date_filter or datetime.now().date()),
-                dpi=dpi,
-                width=1400,
-                height=1400
-            )
+        # Call HF Spaces visualization API (run in executor to prevent blocking)
+        image_bytes = await run_in_executor(
+            _call_visualization_api,
+            embeddings.tolist(),
+            doc_texts,
+            str(date_filter or datetime.now().date()),
+            dpi,
+            AI_SERVICE_URL,
+            AI_SERVICE_TIMEOUT
+        )
 
         # Return image with cache control headers
         return Response(

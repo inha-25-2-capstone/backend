@@ -8,7 +8,7 @@ Backend development guide for Political News Aggregation System.
 
 **Architecture**: Hybrid cloud - Render (backend + BERTopic) + HF Spaces (AI service) + Redis (task queue)
 
-**Current Status (2025-11-20)**:
+**Current Status (2025-11-23)**:
 - ✅ BERTopic clustering with Title+Summary embeddings ⭐
 - ✅ Real cosine similarity calculation (article ↔ topic centroid) ⭐
 - ✅ Topic centroids stored in DB for ranking ⭐
@@ -20,9 +20,11 @@ Backend development guide for Political News Aggregation System.
 - ✅ **API testing** completed with real data (1,041 articles, 8 topics) ⭐
 - ✅ **Production optimizations** (Scraper retry logic, Celery concurrency control, Redis pool limit) ⭐
 - ✅ Frontend structure (React 19 + TypeScript + TanStack Query in front/ folder) ⭐
-- ✅ **HF Spaces stability** (memory management, psutil monitoring, pre-cleanup at >85%) ⭐
+- ✅ **HF Spaces memory leak fixes** (logger, embedding, bertopic, matplotlib) ⭐
+- ✅ **Worker concurrency**: 4 → 1 (prevents HF Spaces overload) ⭐
 - ✅ **AI_SERVICE_TIMEOUT** increased to 600s for reliability ⭐
 - ✅ **DB triggers removed** from both local and Render DB (article_count fix) ⭐
+- ✅ **run_in_executor**: Health check timeout fix (all DB queries in thread pool) ⭐
 - ⏳ Recommendation Engine (next priority)
 - ⏳ Stance analysis (model training in progress)
 
@@ -43,6 +45,7 @@ backend/
 ├── src/
 │   ├── api/                      # FastAPI application ✅
 │   │   ├── main.py               # FastAPI app with CORS
+│   │   ├── utils.py              # run_in_executor utility (thread pool for DB) ⭐
 │   │   ├── routes/               # API routes (Health, Topics, Articles, Press)
 │   │   │   ├── __init__.py
 │   │   │   ├── health.py
@@ -264,7 +267,7 @@ python scripts/migrate.py down
 - Stance field: Currently `null` (model not ready)
 
 ### Celery Worker Configuration ⭐
-- **Concurrency**: 4 workers (prevents HF Spaces overload)
+- **Concurrency**: 1 worker (prevents HF Spaces overload, sequential processing)
 - **Prefetch Multiplier**: 1 (process one task at a time)
 - **Max Tasks Per Child**: 50 (restart worker after 50 tasks)
 - **Redis Connection Pool**: 10 connections (prevents Redis "max clients" error)
@@ -281,6 +284,17 @@ python scripts/migrate.py down
 - **Centroids**: Computed in HF Spaces, stored in Backend DB ⭐
 - **Output**: Topic titles from top 3 c-TF-IDF keywords
 - **Memory**: 16GB available on HF Spaces (vs 512MB on Worker)
+
+### FastAPI Async Handling ⭐
+- **run_in_executor**: All sync DB operations run in thread pool (10 workers)
+- **Location**: `src/api/utils.py`
+- **Prevents**: Event loop blocking (fixes health check timeout)
+- **Files Updated**:
+  - `health.py`: DB/Redis checks in executor + Redis connection pool reuse
+  - `articles.py`: `_fetch_articles_list`, `_fetch_article_detail`
+  - `topics.py`: `_fetch_topics_list`, `_fetch_topic_detail`, `_fetch_topic_articles`
+  - `press.py`: `_fetch_all_press`, `_fetch_press_articles` (optimized with JOIN)
+- **Usage**: `result = await run_in_executor(sync_func, arg1, arg2)`
 
 ### 1시간 Pipeline ⭐
 - **Cron job**: Runs every hour on Render
