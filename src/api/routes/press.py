@@ -2,7 +2,7 @@
 Press (news organizations) API endpoints.
 """
 from fastapi import APIRouter, HTTPException, Query, status
-from typing import Optional, List
+from typing import Optional, List, Dict, Any, Tuple
 import logging
 import math
 
@@ -15,11 +15,79 @@ from src.api.schemas import (
     StanceDistribution,
     StanceType,
 )
+from src.api.utils import run_in_executor
 from src.models.database import get_db_cursor
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _fetch_all_press(sort_order: str) -> List[Dict[str, Any]]:
+    """Synchronous function to fetch all press with article counts."""
+    with get_db_cursor() as cur:
+        # Fetch all press with article count in one query
+        query = f"""
+            SELECT
+                p.press_id,
+                p.press_name,
+                COUNT(a.article_id) as article_count
+            FROM press p
+            LEFT JOIN article a ON p.press_id = a.press_id
+            GROUP BY p.press_id, p.press_name
+            ORDER BY p.press_name COLLATE "C" {sort_order}
+        """
+        cur.execute(query)
+        return cur.fetchall()
+
+
+def _fetch_press_articles(
+    press_id: str,
+    sort_order: str,
+    limit: int,
+    offset: int
+) -> Tuple[bool, int, List[Dict[str, Any]]]:
+    """Synchronous function to fetch articles by press."""
+    with get_db_cursor() as cur:
+        # Verify press exists
+        cur.execute(
+            "SELECT press_id FROM press WHERE press_id = %s",
+            (press_id,)
+        )
+        if not cur.fetchone():
+            return False, 0, []
+
+        # Count total articles
+        cur.execute(
+            """
+            SELECT COUNT(*) as total
+            FROM article
+            WHERE press_id = %s
+            """,
+            (press_id,)
+        )
+        result = cur.fetchone()
+        total = result['total'] if result else 0
+
+        # Fetch articles
+        query = f"""
+            SELECT
+                a.article_id,
+                a.title,
+                a.published_at,
+                a.img_url,
+                p.press_id,
+                p.press_name
+            FROM article a
+            JOIN press p ON a.press_id = p.press_id
+            WHERE a.press_id = %s
+            ORDER BY a.published_at {sort_order}
+            LIMIT %s OFFSET %s
+        """
+        cur.execute(query, (press_id, limit, offset))
+        articles = cur.fetchall()
+
+        return True, total, articles
 
 
 @router.get(
@@ -50,45 +118,28 @@ async def get_all_press(
         sort_parts = sort.split(':')
         sort_order = sort_parts[1].upper() if len(sort_parts) > 1 else 'ASC'
 
-        with get_db_cursor() as cur:
-            # Fetch all press
-            query = f"""
-                SELECT
-                    p.press_id,
-                    p.press_name
-                FROM press p
-                ORDER BY p.press_name COLLATE "C" {sort_order}
-            """
-            cur.execute(query)
-            press_list = cur.fetchall()
+        # Run blocking DB query in executor
+        press_list = await run_in_executor(_fetch_all_press, sort_order)
 
-            # Build response
-            result = []
-            for press in press_list:
-                # Get article count
-                cur.execute(
-                    "SELECT COUNT(*) as count FROM article WHERE press_id = %s",
-                    (press['press_id'],)
+        # Build response
+        result = []
+        for press in press_list:
+            # Get stance distribution (if include requested)
+            stance_dist = None
+            if 'statistics' in includes:
+                # TODO: Calculate from stance_analysis table when model is ready
+                pass
+
+            result.append(
+                PressDetail(
+                    id=press['press_id'],
+                    name=press['press_name'],
+                    article_count=press['article_count'],
+                    stance_distribution=stance_dist,
                 )
-                count_result = cur.fetchone()
-                article_count = count_result['count'] if count_result else 0
+            )
 
-                # Get stance distribution (if include requested)
-                stance_dist = None
-                if 'statistics' in includes:
-                    # TODO: Calculate from stance_analysis table when model is ready
-                    pass
-
-                result.append(
-                    PressDetail(
-                        id=press['press_id'],
-                        name=press['press_name'],
-                        article_count=article_count,
-                        stance_distribution=stance_dist,
-                    )
-                )
-
-            return result
+        return result
 
     except Exception as e:
         logger.error(f"Error fetching press list: {e}", exc_info=True)
@@ -126,85 +177,57 @@ async def get_press_articles(
         Paginated list of articles
     """
     try:
-        with get_db_cursor() as cur:
-            # Verify press exists
-            cur.execute(
-                "SELECT press_id FROM press WHERE press_id = %s",
-                (press_id,)
+        # Calculate pagination
+        offset = (page - 1) * limit
+
+        # Parse sort parameter
+        sort_parts = sort.split(':')
+        sort_order = sort_parts[1].upper() if len(sort_parts) > 1 else 'DESC'
+
+        # Run blocking DB query in executor
+        exists, total, articles = await run_in_executor(
+            _fetch_press_articles,
+            press_id,
+            sort_order,
+            limit,
+            offset
+        )
+
+        if not exists:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Press {press_id} not found"
             )
-            if not cur.fetchone():
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Press {press_id} not found"
-                )
 
-            # Count total articles
-            # Note: stance filter not implemented yet
-            cur.execute(
-                """
-                SELECT COUNT(*) as total
-                FROM article
-                WHERE press_id = %s
-                """,
-                (press_id,)
-            )
-            result = cur.fetchone()
-            total = result['total'] if result else 0
+        total_pages = math.ceil(total / limit) if total > 0 else 0
 
-            # Calculate pagination
-            offset = (page - 1) * limit
-            total_pages = math.ceil(total / limit) if total > 0 else 0
-
-            # Parse sort parameter
-            sort_parts = sort.split(':')
-            sort_order = sort_parts[1].upper() if len(sort_parts) > 1 else 'DESC'
-
-            # Fetch articles
-            query = f"""
-                SELECT
-                    a.article_id,
-                    a.title,
-                    a.published_at,
-                    a.img_url,
-                    p.press_id,
-                    p.press_name
-                FROM article a
-                JOIN press p ON a.press_id = p.press_id
-                WHERE a.press_id = %s
-                ORDER BY a.published_at {sort_order}
-                LIMIT %s OFFSET %s
-            """
-
-            cur.execute(query, (press_id, limit, offset))
-            articles = cur.fetchall()
-
-            # Build response
-            article_list = []
-            for article in articles:
-                article_list.append(
-                    ArticleSummary(
-                        id=article['article_id'],
-                        title=article['title'],
-                        press=PressInfo(
-                            id=article['press_id'],
-                            name=article['press_name']
-                        ),
-                        published_at=article['published_at'],
-                        image_url=article['img_url'],
-                        stance=None,  # TODO: when stance model ready
-                        similarity_score=None,
-                    )
-                )
-
-            return PaginatedResponse(
-                data=article_list,
-                pagination=PaginationMeta(
-                    page=page,
-                    limit=limit,
-                    total=total,
-                    total_pages=total_pages,
+        # Build response
+        article_list = []
+        for article in articles:
+            article_list.append(
+                ArticleSummary(
+                    id=article['article_id'],
+                    title=article['title'],
+                    press=PressInfo(
+                        id=article['press_id'],
+                        name=article['press_name']
+                    ),
+                    published_at=article['published_at'],
+                    image_url=article['img_url'],
+                    stance=None,  # TODO: when stance model ready
+                    similarity_score=None,
                 )
             )
+
+        return PaginatedResponse(
+            data=article_list,
+            pagination=PaginationMeta(
+                page=page,
+                limit=limit,
+                total=total,
+                total_pages=total_pages,
+            )
+        )
 
     except HTTPException:
         raise

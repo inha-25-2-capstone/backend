@@ -6,6 +6,7 @@ from datetime import datetime
 import logging
 
 from src.api.schemas import HealthResponse
+from src.api.utils import run_in_executor
 from src.models.database import get_db_cursor
 from src.config import REDIS_URL
 import redis
@@ -13,6 +14,41 @@ import redis
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# Reusable Redis connection pool for health checks
+_redis_pool = None
+
+
+def _get_redis_pool():
+    """Get or create Redis connection pool."""
+    global _redis_pool
+    if _redis_pool is None:
+        _redis_pool = redis.ConnectionPool.from_url(REDIS_URL, max_connections=5)
+    return _redis_pool
+
+
+def _check_database() -> str:
+    """Synchronous database health check."""
+    try:
+        with get_db_cursor() as cur:
+            cur.execute("SELECT 1")
+            cur.fetchone()
+        return "healthy"
+    except Exception as e:
+        logger.error(f"Database health check failed: {e}")
+        return "unhealthy"
+
+
+def _check_redis() -> str:
+    """Synchronous Redis health check using connection pool."""
+    try:
+        pool = _get_redis_pool()
+        r = redis.Redis(connection_pool=pool)
+        r.ping()
+        return "healthy"
+    except Exception as e:
+        logger.error(f"Redis health check failed: {e}")
+        return "unhealthy"
 
 
 @router.get(
@@ -34,25 +70,10 @@ async def health_check():
     Returns:
         HealthResponse: Health status information
     """
-    # Check database
-    db_status = "healthy"
-    try:
-        with get_db_cursor() as cur:
-            cur.execute("SELECT 1")
-            cur.fetchone()
-    except Exception as e:
-        logger.error(f"Database health check failed: {e}")
-        db_status = "unhealthy"
-
-    # Check Redis
-    redis_status = "healthy"
-    try:
-        r = redis.from_url(REDIS_URL)
-        r.ping()
-        r.close()
-    except Exception as e:
-        logger.error(f"Redis health check failed: {e}")
-        redis_status = "unhealthy"
+    # Run blocking checks in thread pool executor
+    db_status, redis_status = await run_in_executor(
+        lambda: (_check_database(), _check_redis())
+    )
 
     # Overall status
     overall_status = "healthy" if db_status == "healthy" and redis_status == "healthy" else "degraded"
