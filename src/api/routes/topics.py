@@ -22,9 +22,6 @@ from src.api.schemas import (
 )
 from src.api.utils import run_in_executor
 from src.models.database import get_db_cursor
-from src.services.bertopic_service import fetch_articles_with_embeddings
-from src.services.ai_client import create_ai_client
-import os
 
 logger = logging.getLogger(__name__)
 
@@ -179,24 +176,17 @@ def _fetch_topic_articles(
         return True, total, articles
 
 
-def _call_visualization_api(
-    embeddings_list: List[List[float]],
-    doc_texts: List[str],
-    news_date: str,
-    dpi: int,
-    ai_service_url: str,
-    ai_service_timeout: int
-) -> bytes:
-    """Synchronous function to call HF Spaces visualization API."""
-    with create_ai_client(base_url=ai_service_url, timeout=ai_service_timeout) as ai_client:
-        return ai_client.generate_topic_visualization(
-            embeddings=embeddings_list,
-            texts=doc_texts,
-            news_date=news_date,
-            dpi=dpi,
-            width=1400,
-            height=1400
+def _fetch_visualization_from_db() -> Dict[str, Any]:
+    """Synchronous function to fetch visualization from database."""
+    with get_db_cursor() as cur:
+        cur.execute(
+            """
+            SELECT news_date, image_data, dpi, article_count, created_at
+            FROM topic_visualization
+            WHERE id = 1
+            """
         )
+        return cur.fetchone()
 
 
 @router.get(
@@ -301,96 +291,67 @@ async def get_topics(
     response_class=Response,
     status_code=status.HTTP_200_OK,
     summary="Get topic visualization",
-    description="Generate DataMapPlot visualization of BERTopic clustering",
+    description="Get pre-generated DataMapPlot visualization of BERTopic clustering",
     responses={
         200: {
             "content": {"image/png": {}},
             "description": "PNG image of topic clustering visualization"
         },
-        400: {"description": "Bad request (not enough data)"},
+        404: {"description": "No visualization available"},
         500: {"description": "Internal server error"}
     }
 )
-async def get_topic_visualization(
-    date_filter: Optional[date] = Query(None, alias="date", description="Filter by date (YYYY-MM-DD)"),
-    limit: int = Query(200, ge=10, le=1000, description="Number of articles to visualize"),
-    dpi: int = Query(150, ge=50, le=300, description="Image resolution (DPI)"),
-):
+async def get_topic_visualization():
     """
-    Generate and return DataMapPlot visualization of topic clustering.
+    Get pre-generated DataMapPlot visualization of topic clustering.
 
-    This endpoint runs BERTopic clustering on articles from the database and
-    generates a DataMapPlot visualization showing how articles are clustered
-    into topics.
-
-    Args:
-        date_filter: Filter articles by specific date (default: today)
-        limit: Maximum number of articles to visualize (default: 200)
-        dpi: Image resolution in DPI (default: 150)
+    This endpoint returns the visualization image that was generated during
+    the hourly pipeline (after BERTopic clustering).
 
     Returns:
         PNG image with Content-Type: image/png and 1-hour cache control
 
     Note:
-        - Generates visualization on-the-fly (may take 10-30 seconds)
-        - Cached for 1 hour to improve performance
-        - Requires at least 5 articles with embeddings
+        - Returns pre-generated image (fast response)
+        - Generated automatically every hour after BERTopic clustering
+        - Returns 404 if no visualization has been generated yet
     """
     try:
-        logger.info(f"Generating visualization (date={date_filter}, limit={limit})")
+        # Fetch visualization from DB
+        result = await run_in_executor(_fetch_visualization_from_db)
 
-        # Fetch articles with embeddings from DB (run in executor)
-        articles, embeddings, doc_texts = await run_in_executor(
-            fetch_articles_with_embeddings,
-            date_filter,
-            limit
-        )
+        if not result:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No visualization available. It will be generated after the next pipeline run."
+            )
 
-        if not articles or embeddings is None:
-            raise ValueError("No articles with embeddings found")
+        image_data = result['image_data']
+        news_date = result['news_date']
 
-        if len(articles) < 5:
-            raise ValueError(f"Not enough articles for visualization ({len(articles)} < 5)")
+        # Handle memoryview type (psycopg2 returns BYTEA as memoryview)
+        if isinstance(image_data, memoryview):
+            image_data = bytes(image_data)
 
-        logger.info(f"Sending {len(articles)} articles to HF Spaces for visualization")
-
-        # Get AI service configuration
-        AI_SERVICE_URL = os.getenv("AI_SERVICE_URL", "https://gaaahee-news-stance-detection.hf.space")
-        AI_SERVICE_TIMEOUT = int(os.getenv("AI_SERVICE_TIMEOUT", "240"))
-
-        # Call HF Spaces visualization API (run in executor to prevent blocking)
-        image_bytes = await run_in_executor(
-            _call_visualization_api,
-            embeddings.tolist(),
-            doc_texts,
-            str(date_filter or datetime.now().date()),
-            dpi,
-            AI_SERVICE_URL,
-            AI_SERVICE_TIMEOUT
-        )
+        logger.info(f"Returning visualization for {news_date} ({len(image_data)} bytes)")
 
         # Return image with cache control headers
         return Response(
-            content=image_bytes,
+            content=image_data,
             media_type="image/png",
             headers={
                 "Cache-Control": "public, max-age=3600",  # Cache for 1 hour
-                "Content-Disposition": f'inline; filename="topic_visualization_{date_filter or "latest"}.png"'
+                "Content-Disposition": f'inline; filename="topic_visualization_{news_date}.png"'
             }
         )
 
-    except ValueError as e:
-        # Not enough data for visualization
-        logger.warning(f"Visualization failed: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error generating visualization: {e}", exc_info=True)
+        logger.error(f"Error fetching visualization: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to generate visualization"
+            detail="Failed to fetch visualization"
         )
 
 

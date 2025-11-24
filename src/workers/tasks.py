@@ -359,6 +359,43 @@ def bertopic_clustering_task(self, news_date_str: str = None, limit: int = 200):
 
         logger.info(f"Saved {topics_saved} topics and {mappings_saved} article mappings to database")
 
+        # Generate and save visualization
+        try:
+            logger.info("Generating topic visualization...")
+
+            with create_ai_client(base_url=AI_SERVICE_URL, timeout=AI_SERVICE_TIMEOUT) as ai_client:
+                image_bytes = ai_client.generate_topic_visualization(
+                    embeddings=embeddings_list,
+                    texts=doc_texts,
+                    news_date=str(result_date),
+                    dpi=150,
+                    width=1400,
+                    height=1400
+                )
+
+            # Save to database (UPSERT - always id=1)
+            with get_db_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        INSERT INTO topic_visualization (id, news_date, image_data, dpi, article_count, created_at)
+                        VALUES (1, %s, %s, %s, %s, NOW())
+                        ON CONFLICT (id) DO UPDATE SET
+                            news_date = EXCLUDED.news_date,
+                            image_data = EXCLUDED.image_data,
+                            dpi = EXCLUDED.dpi,
+                            article_count = EXCLUDED.article_count,
+                            created_at = NOW()
+                        """,
+                        (result_date, image_bytes, 150, len(articles))
+                    )
+                    conn.commit()
+
+            logger.info(f"Visualization saved to database ({len(image_bytes)} bytes)")
+
+        except Exception as viz_error:
+            logger.warning(f"Failed to generate/save visualization (non-critical): {viz_error}")
+
         return {
             'success': True,
             'topics_saved': topics_saved,
