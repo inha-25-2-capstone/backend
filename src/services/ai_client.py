@@ -274,7 +274,11 @@ class AIServiceClient:
         article_ids: List[int],
         news_date: str,
         min_topic_size: int = 5,
-        nr_topics: str = "auto"
+        nr_topics: str = "auto",
+        include_visualization: bool = False,
+        viz_dpi: int = 150,
+        viz_width: int = 1400,
+        viz_height: int = 1400
     ) -> Dict[str, Any]:
         """
         Call HF Spaces BERTopic clustering API with Mecab tokenizer (KoBERTopic approach).
@@ -286,6 +290,10 @@ class AIServiceClient:
             news_date: YYYY-MM-DD format
             min_topic_size: Minimum articles per topic
             nr_topics: "auto" or integer
+            include_visualization: If True, generate visualization with clustering (default: False)
+            viz_dpi: Visualization DPI (default: 150)
+            viz_width: Visualization width in pixels (default: 1400)
+            viz_height: Visualization height in pixels (default: 1400)
 
         Returns:
             {
@@ -294,7 +302,8 @@ class AIServiceClient:
                 'total_topics': int,
                 'total_articles': int,
                 'outliers': int,
-                'news_date': str
+                'news_date': str,
+                'visualization': Optional[str]  # base64-encoded PNG if include_visualization=True
             }
         """
         # Ensure service is warmed up
@@ -302,7 +311,8 @@ class AIServiceClient:
             if not self.warmup():
                 raise ConnectionError("AI service is not available")
 
-        logger.info(f"Calling HF Spaces Mecab BERTopic clustering API for {news_date} ({len(article_ids)} articles)")
+        viz_msg = " with visualization" if include_visualization else ""
+        logger.info(f"Calling HF Spaces Mecab BERTopic clustering API{viz_msg} for {news_date} ({len(article_ids)} articles)")
 
         payload = {
             "embeddings": embeddings,
@@ -310,7 +320,11 @@ class AIServiceClient:
             "article_ids": article_ids,
             "news_date": news_date,
             "min_topic_size": min_topic_size,
-            "nr_topics": nr_topics
+            "nr_topics": nr_topics,
+            "include_visualization": include_visualization,
+            "viz_dpi": viz_dpi,
+            "viz_width": viz_width,
+            "viz_height": viz_height
         }
 
         last_exception = None
