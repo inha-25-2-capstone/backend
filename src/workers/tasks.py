@@ -192,9 +192,10 @@ def process_articles_batch(self, article_ids: List[int], target_news_date: str =
 )
 def bertopic_clustering_task(self, news_date_str: str = None, limit: int = 200):
     """
-    BERTopic clustering task (runs in backend, not HF Spaces)
+    BERTopic clustering task with Mecab tokenizer (KoBERTopic approach)
 
-    Fetches articles with embeddings from DB and runs sklearn BERTopic clustering.
+    Fetches articles with embeddings from DB and runs Mecab-based BERTopic clustering
+    on HF Spaces for better Korean topic quality.
 
     Args:
         news_date_str: Optional date string (YYYY-MM-DD) to filter articles
@@ -232,11 +233,11 @@ def bertopic_clustering_task(self, news_date_str: str = None, limit: int = 200):
         article_ids = [a['article_id'] for a in articles]
         embeddings_list = embeddings.tolist()
 
-        logger.info(f"Sending {len(articles)} articles to HF Spaces for BERTopic clustering")
+        logger.info(f"Sending {len(articles)} articles to HF Spaces for Mecab BERTopic clustering")
 
-        # Call HF Spaces BERTopic clustering API
+        # Call HF Spaces Mecab BERTopic clustering API
         with create_ai_client(base_url=AI_SERVICE_URL, timeout=AI_SERVICE_TIMEOUT) as ai_client:
-            result = ai_client.cluster_topics(
+            result = ai_client.cluster_topics_mecab(
                 embeddings=embeddings_list,
                 texts=doc_texts,
                 article_ids=article_ids,
