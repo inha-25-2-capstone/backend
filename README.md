@@ -10,8 +10,9 @@ Backend service for Korean political news aggregation and analysis system.
 - **Real Cosine Similarity**: Article-topic similarity calculation (0.33-0.93 range) ⭐
 - **Topic Centroids**: Computed in HF Spaces, stored in DB for ranking ⭐
 - **Topic Visualization**: DataMapPlot API (HF Spaces) with Korean font support ⭐
+- **Daily Keywords**: c-TF-IDF based keyword extraction for word cloud (Top 10 per topic) ⭐
 - **1시간 파이프라인**: Scraping → AI Processing → BERTopic (Celery Chain) ⭐
-- **FastAPI Endpoints**: Topics, Articles, Press, Visualization APIs ⭐
+- **FastAPI Endpoints**: Topics, Articles, Press, Visualization, Daily Keywords APIs ⭐
 - **Database**: PostgreSQL with pgvector extension for similarity search
 - **Task Queue**: Celery + Redis for async processing
 - **Migrations**: Alembic for version-controlled schema management
@@ -60,9 +61,10 @@ Backend service for Korean political news aggregation and analysis system.
      - HF Spaces: CustomTokenizer for Korean text
      - HF Spaces: CountVectorizer + c-TF-IDF
      - HF Spaces: Auto topic detection (min_topic_size=5)
+     - HF Spaces: **Extract keywords** (c-TF-IDF scores, Top 10 per topic) ⭐
      - HF Spaces: **Calculate topic centroids** (mean of article embeddings) ⭐
      - HF Spaces: **Calculate real cosine similarity** (article ↔ centroid) ⭐
-     - Backend: Save centroid_embedding and similarity_scores to DB ⭐
+     - Backend: Save centroid_embedding, similarity_scores, and keywords to DB ⭐
 
 ### TODO
 3. **Stance Analysis** (Celery Task) → Topic-based 옹호/중립/비판 classification

@@ -29,6 +29,9 @@ from .responses import (
     StanceRecommendations,
     # Health
     HealthResponse,
+    # Daily Keywords
+    DailyKeywordsResponse,
+    KeywordItem,
 )
 
 __all__ = [
@@ -58,4 +61,7 @@ __all__ = [
     "StanceRecommendations",
     # Health
     "HealthResponse",
+    # Daily Keywords
+    "DailyKeywordsResponse",
+    "KeywordItem",
 ]

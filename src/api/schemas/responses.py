@@ -210,3 +210,26 @@ class HealthResponse(BaseModel):
     timestamp: datetime = Field(description="Current server time")
     database: str = Field(description="Database connection status")
     redis: str = Field(description="Redis connection status")
+
+
+# ========================================
+# Daily Keywords (Word Cloud)
+# ========================================
+
+class KeywordItem(BaseModel):
+    """Single keyword with weight for word cloud."""
+    text: str = Field(description="Keyword text")
+    weight: float = Field(ge=0, description="Keyword weight (aggregated score)")
+
+    class Config:
+        from_attributes = True
+
+
+class DailyKeywordsResponse(BaseModel):
+    """Daily keywords response for word cloud visualization."""
+    date: str = Field(description="News date (YYYY-MM-DD)")
+    total_topics: int = Field(ge=0, description="Number of topics analyzed")
+    keywords: List[KeywordItem] = Field(description="Top keywords with weights")
+
+    class Config:
+        from_attributes = True

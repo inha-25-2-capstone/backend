@@ -4,11 +4,12 @@ Handles batch AI processing (summarization + embedding + stance)
 """
 from typing import List
 import os
+import json
 from datetime import datetime
 import redis
 from src.workers.celery_app import celery_app
 from src.services.ai_client import create_ai_client, ArticleInput
-from src.models.database import ArticleRepository
+from src.models.database import ArticleRepository, StanceRepository
 from src.utils.logger import setup_logger
 
 logger = setup_logger()
@@ -122,9 +123,24 @@ def process_articles_batch(self, article_ids: List[int], target_news_date: str =
                     successful_count += 1
                     logger.debug(f"Article {result.article_id} updated successfully")
 
-                # TODO: Save stance to stance_analysis table when model ready
-                # if result.stance:
-                #     stance_repo.insert(...)
+                # Save stance analysis result
+                if result.stance:
+                    try:
+                        StanceRepository.insert(
+                            article_id=result.article_id,
+                            stance_label=result.stance['stance_label'],
+                            prob_positive=result.stance['prob_positive'],
+                            prob_neutral=result.stance['prob_neutral'],
+                            prob_negative=result.stance['prob_negative'],
+                            stance_score=result.stance['stance_score']
+                        )
+                        logger.debug(
+                            f"Article {result.article_id} stance saved: "
+                            f"{result.stance['stance_label']} (score: {result.stance['stance_score']:.4f})"
+                        )
+                    except Exception as e:
+                        logger.error(f"Failed to save stance for article {result.article_id}: {e}")
+                        # Don't fail the whole batch if stance saving fails
 
             except Exception as e:
                 logger.error(f"Failed to save article {result.article_id}: {e}")
@@ -162,10 +178,16 @@ def process_articles_batch(self, article_ids: List[int], target_news_date: str =
                 # If all batches complete, trigger BERTopic
                 if total and int(completed) >= int(total):
                     logger.info(f"🎯 All AI batches complete! Triggering BERTopic clustering...")
+                    logger.info(f"   Waiting 60 seconds for final batch to complete...")
+
+                    # Trigger BERTopic with full article clustering (no limit)
                     bertopic_clustering_task.apply_async(
-                        args=[news_date_str, 200],
-                        countdown=10  # 10초 후 실행 (안전 마진)
+                        args=[news_date_str, None],  # None = 전체 기사 클러스터링 ⭐
+                        countdown=60  # 60초 후 실행 (마지막 배치 완료 대기) ⭐
                     )
+
+                    logger.info(f"   BERTopic will cluster ALL articles with embeddings for {news_date_str}")
+
                     # Clean up Redis keys
                     redis_client.delete(counter_key)
                     redis_client.delete(total_key)
@@ -190,16 +212,16 @@ def process_articles_batch(self, article_ids: List[int], target_news_date: str =
     max_retries=3,
     default_retry_delay=60
 )
-def bertopic_clustering_task(self, news_date_str: str = None, limit: int = 200):
+def bertopic_clustering_task(self, news_date_str: str = None, limit: int = None):
     """
-    BERTopic clustering task with Mecab tokenizer (KoBERTopic approach)
+    BERTopic clustering task with Improved Noun-only tokenizer
 
-    Fetches articles with embeddings from DB and runs Mecab-based BERTopic clustering
-    on HF Spaces for better Korean topic quality.
+    Fetches articles with embeddings from DB and runs improved BERTopic clustering
+    with noun-only extraction for better topic titles (3-6 words).
 
     Args:
         news_date_str: Optional date string (YYYY-MM-DD) to filter articles
-        limit: Maximum number of articles to cluster
+        limit: Maximum number of articles to cluster (None = all articles) ⭐
 
     Returns:
         dict: Clustering results with topics saved to database
@@ -214,9 +236,15 @@ def bertopic_clustering_task(self, news_date_str: str = None, limit: int = 200):
         news_date = None
         if news_date_str:
             news_date = datetime.strptime(news_date_str, "%Y-%m-%d").date()
-            logger.info(f"Starting BERTopic clustering for {news_date_str}")
+            if limit:
+                logger.info(f"Starting BERTopic clustering for {news_date_str} (limit: {limit})")
+            else:
+                logger.info(f"Starting BERTopic clustering for {news_date_str} (ALL articles) ⭐")
         else:
-            logger.info(f"Starting BERTopic clustering for recent {limit} articles")
+            if limit:
+                logger.info(f"Starting BERTopic clustering for recent {limit} articles")
+            else:
+                logger.info(f"Starting BERTopic clustering for ALL recent articles ⭐")
 
         # Fetch articles with embeddings from DB
         articles, embeddings, doc_texts = fetch_articles_with_embeddings(news_date, limit)
@@ -233,11 +261,11 @@ def bertopic_clustering_task(self, news_date_str: str = None, limit: int = 200):
         article_ids = [a['article_id'] for a in articles]
         embeddings_list = embeddings.tolist()
 
-        logger.info(f"Sending {len(articles)} articles to HF Spaces for Mecab BERTopic clustering")
+        logger.info(f"Sending {len(articles)} articles to HF Spaces for Improved BERTopic clustering")
 
-        # Call HF Spaces Mecab BERTopic clustering API (with visualization)
+        # Call HF Spaces Improved BERTopic clustering API (with visualization)
         with create_ai_client(base_url=AI_SERVICE_URL, timeout=AI_SERVICE_TIMEOUT) as ai_client:
-            result = ai_client.cluster_topics_mecab(
+            result = ai_client.cluster_topics_improved(
                 embeddings=embeddings_list,
                 texts=doc_texts,
                 article_ids=article_ids,
@@ -315,23 +343,31 @@ def bertopic_clustering_task(self, news_date_str: str = None, limit: int = 200):
                     if centroid:
                         centroid_str = '[' + ','.join(map(str, centroid)) + ']'
 
-                    # Insert topic with centroid, rank, and cluster score
+                    # Prepare keywords for DB (JSONB format - Top 10 for word cloud)
+                    keywords_json = None
+                    if 'keywords' in topic and topic['keywords']:
+                        # Store Top 10 keywords with scores
+                        top_keywords = topic['keywords'][:10]
+                        keywords_json = json.dumps(top_keywords, ensure_ascii=False)
+                        logger.debug(f"Topic {topic['topic_id']}: storing {len(top_keywords)} keywords")
+
+                    # Insert topic with centroid, rank, cluster score, and keywords
                     # Note: article_count is manually managed (triggers removed)
 
                     # DEBUG: Log exact values being passed to INSERT
-                    logger.info(f"PRE-INSERT VALUES - Topic {topic['topic_id']}: article_count={article_count}, cluster_score={cluster_score}, topic_rank={topic_rank}")
+                    logger.info(f"PRE-INSERT VALUES - Topic {topic['topic_id']}: article_count={article_count}, cluster_score={cluster_score}, topic_rank={topic_rank}, keywords={len(topic.get('keywords', []))}")
 
                     cursor.execute(
                         """
                         INSERT INTO topic (
                             topic_date, topic_title, main_article_id, article_count,
-                            topic_rank, cluster_score, centroid_embedding, created_at
+                            topic_rank, cluster_score, centroid_embedding, keywords, created_at
                         )
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())
                         RETURNING topic_id
                         """,
                         (result_date, topic_title, main_article_id, article_count,
-                         topic_rank, cluster_score, centroid_str)
+                         topic_rank, cluster_score, centroid_str, keywords_json)
                     )
 
                     db_topic_id = cursor.fetchone()[0]

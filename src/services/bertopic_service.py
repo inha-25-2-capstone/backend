@@ -16,14 +16,14 @@ logger = setup_logger()
 
 def fetch_articles_with_embeddings(
     news_date: Optional[datetime.date] = None,
-    limit: int = 200
+    limit: Optional[int] = None
 ) -> Tuple[List[Dict], Optional[np.ndarray], List[str]]:
     """
     Fetch articles with embeddings from database.
 
     Args:
         news_date: Optional date to filter by news_date
-        limit: Maximum number of articles
+        limit: Maximum number of articles (None = no limit, fetch all)
 
     Returns:
         Tuple of (articles, embeddings, doc_texts):
@@ -34,26 +34,49 @@ def fetch_articles_with_embeddings(
     with get_db_connection() as conn:
         with conn.cursor() as cursor:
             if news_date:
-                query = """
-                    SELECT article_id, title, summary, embedding
-                    FROM article
-                    WHERE summary IS NOT NULL
-                      AND embedding IS NOT NULL
-                      AND news_date = %s
-                    ORDER BY created_at DESC
-                    LIMIT %s
-                """
-                cursor.execute(query, (news_date, limit))
+                if limit:
+                    query = """
+                        SELECT article_id, title, summary, embedding
+                        FROM article
+                        WHERE summary IS NOT NULL
+                          AND embedding IS NOT NULL
+                          AND news_date = %s
+                        ORDER BY created_at DESC
+                        LIMIT %s
+                    """
+                    cursor.execute(query, (news_date, limit))
+                else:
+                    # No limit - fetch all articles for this date
+                    query = """
+                        SELECT article_id, title, summary, embedding
+                        FROM article
+                        WHERE summary IS NOT NULL
+                          AND embedding IS NOT NULL
+                          AND news_date = %s
+                        ORDER BY created_at DESC
+                    """
+                    cursor.execute(query, (news_date,))
             else:
-                query = """
-                    SELECT article_id, title, summary, embedding
-                    FROM article
-                    WHERE summary IS NOT NULL
-                      AND embedding IS NOT NULL
-                    ORDER BY created_at DESC
-                    LIMIT %s
-                """
-                cursor.execute(query, (limit,))
+                if limit:
+                    query = """
+                        SELECT article_id, title, summary, embedding
+                        FROM article
+                        WHERE summary IS NOT NULL
+                          AND embedding IS NOT NULL
+                        ORDER BY created_at DESC
+                        LIMIT %s
+                    """
+                    cursor.execute(query, (limit,))
+                else:
+                    # No limit - fetch all articles
+                    query = """
+                        SELECT article_id, title, summary, embedding
+                        FROM article
+                        WHERE summary IS NOT NULL
+                          AND embedding IS NOT NULL
+                        ORDER BY created_at DESC
+                    """
+                    cursor.execute(query)
 
             rows = cursor.fetchall()
 

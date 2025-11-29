@@ -384,6 +384,133 @@ class ArticleRepository:
             )
 
 
+class StanceRepository:
+    """Repository for stance_analysis table operations"""
+
+    @staticmethod
+    def insert(
+        article_id: int,
+        stance_label: str,
+        prob_positive: float,
+        prob_neutral: float,
+        prob_negative: float,
+        stance_score: float
+    ) -> int:
+        """
+        Insert stance analysis result for an article.
+
+        Args:
+            article_id: Article ID
+            stance_label: 'support', 'neutral', or 'oppose'
+            prob_positive: Probability of support (0-1)
+            prob_neutral: Probability of neutral (0-1)
+            prob_negative: Probability of oppose (0-1)
+            stance_score: Stance score = prob_positive - prob_negative (-1 to 1)
+
+        Returns:
+            stance_id of inserted record
+        """
+        with get_db_cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO stance_analysis (
+                    article_id, stance_label,
+                    prob_positive, prob_neutral, prob_negative, stance_score
+                )
+                VALUES (%s, %s, %s, %s, %s, %s)
+                ON CONFLICT (article_id) DO UPDATE SET
+                    stance_label = EXCLUDED.stance_label,
+                    prob_positive = EXCLUDED.prob_positive,
+                    prob_neutral = EXCLUDED.prob_neutral,
+                    prob_negative = EXCLUDED.prob_negative,
+                    stance_score = EXCLUDED.stance_score,
+                    analyzed_at = NOW()
+                RETURNING stance_id
+                """,
+                (article_id, stance_label, prob_positive, prob_neutral, prob_negative, stance_score)
+            )
+            result = cur.fetchone()
+            stance_id = result['stance_id']
+            logger.debug(
+                f"Inserted stance for article {article_id}: "
+                f"{stance_label} (score: {stance_score:.4f})"
+            )
+            return stance_id
+
+    @staticmethod
+    def get_by_article_id(article_id: int) -> Optional[Dict[str, Any]]:
+        """Get stance analysis result for an article."""
+        with get_db_cursor() as cur:
+            cur.execute(
+                """
+                SELECT *
+                FROM stance_analysis
+                WHERE article_id = %s
+                """,
+                (article_id,)
+            )
+            return cur.fetchone()
+
+    @staticmethod
+    def get_by_stance_label(stance_label: str, limit: int = 100) -> List[Dict[str, Any]]:
+        """Get articles by stance label."""
+        with get_db_cursor() as cur:
+            cur.execute(
+                """
+                SELECT s.*, a.title, a.press_id, a.news_date
+                FROM stance_analysis s
+                JOIN article a ON s.article_id = a.article_id
+                WHERE s.stance_label = %s
+                ORDER BY s.analyzed_at DESC
+                LIMIT %s
+                """,
+                (stance_label, limit)
+            )
+            return cur.fetchall()
+
+    @staticmethod
+    def count_by_stance(news_date: Optional[str] = None) -> Dict[str, int]:
+        """
+        Count articles by stance label.
+
+        Args:
+            news_date: Optional news_date filter (YYYY-MM-DD)
+
+        Returns:
+            Dict with counts: {'support': 10, 'neutral': 20, 'oppose': 5}
+        """
+        with get_db_cursor() as cur:
+            if news_date:
+                cur.execute(
+                    """
+                    SELECT s.stance_label, COUNT(*) as count
+                    FROM stance_analysis s
+                    JOIN article a ON s.article_id = a.article_id
+                    WHERE a.news_date = %s
+                    GROUP BY s.stance_label
+                    """,
+                    (news_date,)
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT stance_label, COUNT(*) as count
+                    FROM stance_analysis
+                    GROUP BY stance_label
+                    """
+                )
+
+            results = cur.fetchall()
+            counts = {row['stance_label']: row['count'] for row in results}
+
+            # Ensure all stance labels are present
+            for label in ['support', 'neutral', 'oppose']:
+                if label not in counts:
+                    counts[label] = 0
+
+            return counts
+
+
 # Initialize connection pool when module is imported
 try:
     init_connection_pool()

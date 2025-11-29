@@ -8,11 +8,18 @@ Backend development guide for Political News Aggregation System.
 
 **Architecture**: Hybrid cloud - Render (backend + BERTopic) + HF Spaces (AI service) + Redis (task queue)
 
-**Current Status (2025-11-23)**:
+**Current Status (2025-11-29)**:
+- ✅ **CUDA tokenization error fixed** (HF Spaces summarizer) ⭐ NEW!
+  - Changed from `tokenizer.encode()` to `tokenizer()` with safe parameters
+  - Prevents CUDA index out-of-bounds during embedding lookup
+  - 100% success rate verified (55 articles, 0 errors)
+  - Production test: 2025-11-29 pipeline (2 topics, 98.2% coverage)
+- ✅ **Improved BERTopic clustering** (Noun-only, 6-word titles, 5x faster) ⭐
+- ✅ **Daily Keywords API** (Word cloud data, aggregated c-TF-IDF scores) ⭐
 - ✅ BERTopic clustering with Title+Summary embeddings ⭐
 - ✅ Real cosine similarity calculation (article ↔ topic centroid) ⭐
 - ✅ Topic centroids stored in DB for ranking ⭐
-- ✅ 1시간 파이프라인 (Scraping → AI → BERTopic with Similarity) ⭐
+- ✅ 1시간 파이프라인 (Scraping → AI → Improved BERTopic) ⭐
 - ✅ HF Spaces-based clustering (sklearn BERTopic) ⭐
 - ✅ Verified: 0.33-0.93 similarity range (8 topics) ⭐
 - ✅ **FastAPI endpoints** (Health, Topics, Articles, Press) ⭐
@@ -25,6 +32,8 @@ Backend development guide for Political News Aggregation System.
 - ✅ **AI_SERVICE_TIMEOUT** increased to 600s for reliability ⭐
 - ✅ **DB triggers removed** from both local and Render DB (article_count fix) ⭐
 - ✅ **run_in_executor**: Health check timeout fix (all DB queries in thread pool) ⭐
+- ✅ **Full article clustering**: Wait for AI completion + unlimited article fetching (38.9% → 92.2% coverage) ⭐
+- ✅ **Integrated visualization**: Clustering + visualization in single API call (prevents topic name mismatch) ⭐
 - ⏳ Recommendation Engine (next priority)
 - ⏳ Stance analysis (model training in progress)
 
@@ -33,7 +42,7 @@ Backend development guide for Political News Aggregation System.
 - **Backend**: FastAPI 0.119.0, Celery, PostgreSQL 16 + pgvector, Redis
 - **AI Service**: Deployed on HF Spaces (https://gaaahee-news-stance-detection.hf.space)
 - **Scraping**: Selenium 4.35.0 + BeautifulSoup4
-- **Clustering**: BERTopic 0.17.3 (sklearn-based, HF Spaces) ⭐
+- **Clustering**: BERTopic 0.17.3 with ImprovedNounTokenizer (sklearn-based, HF Spaces) ⭐
 - **Visualization**: DataMapPlot 0.4.1 + matplotlib 3.9.3 (HF Spaces) ⭐
 - **Database Migrations**: Alembic 1.13.2
 - **Python**: 3.12
@@ -74,7 +83,8 @@ backend/
 │       └── versions/
 │           ├── 1fdac3e26595_initial_schema.py
 │           ├── 50f79b54aace_add_embedding_column.py
-│           └── 6659f7177381_add_centroid_pending.py
+│           ├── 6659f7177381_add_centroid_pending.py
+│           └── f166683ae919_add_keywords_to_topic.py
 ├── scripts/
 │   ├── run_full_pipeline.py      # 1시간 pipeline (scraping+AI+BERTopic) ⭐
 │   ├── run_api.py                # API server startup ✅
@@ -92,7 +102,7 @@ backend/
 
 1. **press** - 6 news organizations
 2. **article** - Full content + summary + embedding(768-dim vector from Title+Summary) ⭐
-3. **topic** - Daily topics from BERTopic clustering + centroid_embedding ⭐
+3. **topic** - Daily topics from BERTopic clustering + centroid_embedding + keywords(JSONB) ⭐
 4. **topic_article_mapping** - Many-to-many with real similarity_score (0.33-0.93) ⭐
 5. **stance_analysis** - 옹호/중립/비판 classification (TODO)
 6. **recommended_article** - Top 3 per stance per topic (TODO)
@@ -102,6 +112,7 @@ backend/
 - Embeddings from Title + Summary (not just summary) ⭐
 - Real cosine similarity scores (not hardcoded) ⭐
 - Topic centroids for ranking and recommendation ⭐
+- Keywords stored in JSONB (Top 10 per topic, c-TF-IDF scores) ⭐
 - KST timezone (5:00 AM news cycle cutoff)
 
 ## Data Pipeline
@@ -129,15 +140,19 @@ Phase 3: BERTopic Clustering (Celery Task, HF Spaces) ⭐ ✅
    ├─ CustomTokenizer for Korean text (regex-based)
    ├─ CountVectorizer + c-TF-IDF
    ├─ Auto topic detection (min_topic_size=5)
+   ├─ Extract keywords (c-TF-IDF scores, Top 10 per topic) ⭐
    ├─ Calculate topic centroids (mean of embeddings) ⭐
    ├─ Calculate real cosine similarity (article ↔ centroid) ⭐
-   └─ Return results to Backend → Save to DB ⭐
+   ├─ **Generate visualization**: DataMapPlot in same API call (prevents topic name mismatch) ⭐
+   ├─ **Full article clustering**: Waits 60s after AI completion, fetches ALL articles with embeddings ⭐
+   └─ Return results to Backend → Save to DB (topics + keywords + visualization) ⭐
             ↓
 Phase 4: FastAPI Endpoints ⭐ ✅
    Health, Topics, Articles, Press APIs
    ├─ Pydantic schemas with Optional stance fields
    ├─ CORS configuration for frontend
    ├─ Pagination support
+   ├─ Daily Keywords API (aggregates keywords for word cloud) ⭐
    └─ API testing completed (1,041 articles, 8 topics, 6 press)
 
 Phase 5: Stance Analysis (TODO - when model ready)
@@ -278,11 +293,14 @@ python scripts/migrate.py down
 - **Algorithm**: sklearn BERTopic with CustomTokenizer
 - **Input**: Pre-computed embeddings from Backend DB
 - **Frequency**: Every 1 hour (after AI processing)
+- **Trigger**: Waits 60 seconds after all AI batches complete (via Redis counter) ⭐
+- **Coverage**: Clusters ALL articles with embeddings (no limit), improves 38.9% → 92.2% ⭐
 - **Min topic size**: 5 articles
 - **Tokenizer**: Regex-based Korean text processing
 - **Similarity**: Real cosine similarity (article ↔ centroid, 0.33-0.93) ⭐
 - **Centroids**: Computed in HF Spaces, stored in Backend DB ⭐
 - **Output**: Topic titles from top 3 c-TF-IDF keywords
+- **Visualization**: Generated in same API call (prevents topic name mismatch) ⭐
 - **Memory**: 16GB available on HF Spaces (vs 512MB on Worker)
 
 ### FastAPI Async Handling ⭐
@@ -301,7 +319,11 @@ python scripts/migrate.py down
 - **Steps**:
   1. Scraping (synchronous)
   2. AI Processing (Celery task, batch of 50)
-  3. BERTopic Clustering (Celery task, waits for AI completion)
+  3. **BERTopic Clustering** (Celery task, triggered after all AI batches complete) ⭐
+     - Waits 60 seconds for final batch to finish
+     - Fetches ALL articles with embeddings (no limit)
+     - Clusters with integrated visualization (prevents topic name mismatch)
+     - Coverage improved: 38.9% → 92.2% ⭐
   4. Stance Analysis (TODO)
 
 ## Implementation Status
@@ -328,7 +350,7 @@ python scripts/migrate.py down
 - `scripts/process_all_articles.py`
 
 ### ✅ Phase 3: BERTopic Clustering - COMPLETED ⭐
-- **Backend-based clustering** with sklearn BERTopic
+- **HF Spaces-based clustering** with sklearn BERTopic ⭐
 - Fetches pre-computed embeddings from DB
 - CustomTokenizer for Korean text (regex-based)
 - CountVectorizer + c-TF-IDF
@@ -336,12 +358,16 @@ python scripts/migrate.py down
 - **Real cosine similarity calculation** (article ↔ topic centroid) ⭐
 - **Topic centroids stored in DB** for ranking/recommendation ⭐
 - **Verified**: Similarity scores 0.33-0.93 (2025-11-11, 8 topics) ⭐
+- **Full article clustering**: Waits 60s after AI completion, fetches ALL articles (no limit) ⭐
+- **Integrated visualization**: Clustering + DataMapPlot in single API call ⭐
+- **Coverage improvement**: 38.9% → 92.2% (2025-11-27) ⭐
 - Celery task for automated clustering
-- Topics saved to database
+- Topics and visualization saved to database
 
 **Files**:
-- `src/services/bertopic_service.py` (clustering logic + similarity calculation) ⭐
-- `src/workers/tasks.py` (bertopic_clustering_task with centroid storage) ⭐
+- `src/services/bertopic_service.py` (data fetching with unlimited option) ⭐
+- `src/workers/tasks.py` (bertopic_clustering_task with wait mechanism) ⭐
+- `src/services/ai_client.py` (cluster_topics_mecab with visualization params) ⭐
 
 ### ✅ Phase 4: FastAPI Endpoints - COMPLETED ⭐
 - Health check endpoint
@@ -433,9 +459,27 @@ python scripts/migrate.py down
 **For detailed API specs**: See AI service docs at https://gaaahee-news-stance-detection.hf.space/docs
 
 **Current Focus**:
-- Backend: FastAPI Endpoints Implementation (Phase 1-3)
+- Backend: Recommendation Engine Implementation
 - Frontend: Router setup and API integration (in front/ folder)
 
+**Recent Updates**:
+- **2025-11-29**: CUDA tokenization error fixed in HF Spaces ✅
+  - ✅ **Root cause**: `tokenizer.encode()` generating invalid token IDs
+  - ✅ **Solution**: Use `tokenizer()` with `return_tensors='pt'`, `truncation=True`, `add_special_tokens=True`
+  - ✅ **Result**: 100% success rate (55 articles, 0 CUDA errors)
+  - ✅ **Prevents**: `indexSelectLargeIndex: Assertion 'srcIndex < srcSelectDimSize' failed`
+  - ✅ **Deployment**: HF Spaces commit 0e7fddc
+  - ✅ **Production test**: 2025-11-29 pipeline (55 articles → 2 topics, 98.2% coverage)
+- **2025-11-28**: Improved BERTopic clustering implementation complete ✅
+  - ✅ ImprovedNounTokenizer: Extracts only nouns (NNG, NNP, NNB, NR)
+  - ✅ Vectorizer optimization: ngram_range=(1,2), min_df=2, max_df=0.90
+  - ✅ 6-word topic titles (consistent, detailed, no duplicates)
+  - ✅ 5x faster processing (28.6s → 5.6s)
+  - ✅ Removed old methods: cluster_topics, cluster_topics_mecab
+  - ✅ Updated tasks.py to use cluster_topics_improved
+  - ✅ Removed old test files (test_mecab_*.py, test_improved_topics.py)
+  - ✅ Production tested: 333 articles → 16 topics (83.8% coverage)
+
 **Architecture**:
-- Backend: 1시간 주기 파이프라인 (Scraping → AI → BERTopic with Similarity) ⭐
+- Backend: 1시간 주기 파이프라인 (Scraping → AI → Improved BERTopic) ⭐
 - Frontend: React 19 + TypeScript + TanStack Query + Material-UI ⭐
