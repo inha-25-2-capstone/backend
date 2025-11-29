@@ -149,6 +149,18 @@ class AIServiceClient:
 
                 data = response.json()
 
+                # Debug: Log first result to check stance data
+                if data["results"]:
+                    first_result = data["results"][0]
+                    logger.info(
+                        f"First result sample - Article {first_result['article_id']}: "
+                        f"has_summary={bool(first_result.get('summary'))}, "
+                        f"has_embedding={bool(first_result.get('embedding'))}, "
+                        f"has_stance={bool(first_result.get('stance'))}"
+                    )
+                    if first_result.get('stance'):
+                        logger.info(f"Stance data: {first_result['stance']}")
+
                 results = [
                     ProcessResult(
                         article_id=result["article_id"],

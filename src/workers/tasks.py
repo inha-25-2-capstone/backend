@@ -126,6 +126,7 @@ def process_articles_batch(self, article_ids: List[int], target_news_date: str =
                 # Save stance analysis result
                 if result.stance:
                     try:
+                        logger.info(f"Article {result.article_id} has stance data: {result.stance}")
                         StanceRepository.insert(
                             article_id=result.article_id,
                             stance_label=result.stance['stance_label'],
@@ -134,13 +135,15 @@ def process_articles_batch(self, article_ids: List[int], target_news_date: str =
                             prob_negative=result.stance['prob_negative'],
                             stance_score=result.stance['stance_score']
                         )
-                        logger.debug(
-                            f"Article {result.article_id} stance saved: "
+                        logger.info(
+                            f"✓ Article {result.article_id} stance saved: "
                             f"{result.stance['stance_label']} (score: {result.stance['stance_score']:.4f})"
                         )
                     except Exception as e:
-                        logger.error(f"Failed to save stance for article {result.article_id}: {e}")
+                        logger.error(f"Failed to save stance for article {result.article_id}: {e}", exc_info=True)
                         # Don't fail the whole batch if stance saving fails
+                else:
+                    logger.warning(f"Article {result.article_id} has NO stance data (stance is None or empty)")
 
             except Exception as e:
                 logger.error(f"Failed to save article {result.article_id}: {e}")
