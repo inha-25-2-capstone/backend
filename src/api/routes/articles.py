@@ -52,10 +52,18 @@ def _fetch_articles_list(
                 a.img_url,
                 p.press_id,
                 p.press_name,
-                sa.stance_label
+                sa.stance_label,
+                tam.similarity_score
             FROM article a
             JOIN press p ON a.press_id = p.press_id
             LEFT JOIN stance_analysis sa ON a.article_id = sa.article_id
+            LEFT JOIN LATERAL (
+                SELECT similarity_score
+                FROM topic_article_mapping
+                WHERE article_id = a.article_id
+                ORDER BY similarity_score DESC
+                LIMIT 1
+            ) tam ON true
             WHERE {where_clause}
             ORDER BY {order_by}
             LIMIT %s OFFSET %s
@@ -69,7 +77,7 @@ def _fetch_articles_list(
 def _fetch_article_detail(article_id: int, includes: set) -> Dict[str, Any]:
     """Synchronous function to fetch article detail."""
     with get_db_cursor() as cur:
-        # Fetch article
+        # Fetch article with basic stance info
         cur.execute(
             """
             SELECT
@@ -82,9 +90,11 @@ def _fetch_article_detail(article_id: int, includes: set) -> Dict[str, Any]:
                 a.published_at,
                 a.author,
                 p.press_id,
-                p.press_name
+                p.press_name,
+                sa.stance_label
             FROM article a
             JOIN press p ON a.press_id = p.press_id
+            LEFT JOIN stance_analysis sa ON a.article_id = sa.article_id
             WHERE a.article_id = %s
             """,
             (article_id,)
@@ -126,7 +136,8 @@ async def get_articles(
     limit: int = Query(20, ge=1, le=100, description="Items per page"),
     press_id: Optional[str] = Query(None, description="Filter by press ID"),
     topic_id: Optional[int] = Query(None, description="Filter by topic ID"),
-    stance: Optional[StanceType] = Query(None, description="Filter by stance (when model is ready)"),
+    stance: Optional[StanceType] = Query(None, description="Filter by stance (support/neutral/oppose)"),
+    has_stance: Optional[bool] = Query(None, description="Filter by stance presence (true: has stance, false: no stance)"),
     start_date: Optional[date] = Query(None, description="Filter by start date (YYYY-MM-DD)"),
     end_date: Optional[date] = Query(None, description="Filter by end date (YYYY-MM-DD)"),
     sort: str = Query("published_at:desc", description="Sort by: published_at:desc, published_at:asc"),
@@ -170,7 +181,24 @@ async def get_articles(
             where_conditions.append("a.published_at <= %s")
             params.append(end_date)
 
-        # Note: stance filter not implemented yet (stance_analysis table empty)
+        # Stance filters
+        if stance:
+            where_conditions.append(
+                "EXISTS (SELECT 1 FROM stance_analysis sa WHERE sa.article_id = a.article_id AND sa.stance_label = %s)"
+            )
+            params.append(stance.value)
+
+        if has_stance is not None:
+            if has_stance:
+                # Only articles WITH stance
+                where_conditions.append(
+                    "EXISTS (SELECT 1 FROM stance_analysis sa WHERE sa.article_id = a.article_id)"
+                )
+            else:
+                # Only articles WITHOUT stance
+                where_conditions.append(
+                    "NOT EXISTS (SELECT 1 FROM stance_analysis sa WHERE sa.article_id = a.article_id)"
+                )
 
         where_clause = " AND ".join(where_conditions) if where_conditions else "1=1"
 
@@ -213,8 +241,8 @@ async def get_articles(
                     ),
                     published_at=article['published_at'],
                     image_url=article['img_url'],
-                    stance=article.get('stance_label'),  # Now fetched from DB
-                    similarity_score=None,
+                    stance=article.get('stance_label'),
+                    similarity_score=float(article['similarity_score']) if article.get('similarity_score') else None,
                 )
             )
 
@@ -285,25 +313,41 @@ async def get_article_detail(
                 name=topic_info['topic_title']
             )
 
-        # Get stance (if include requested)
+        # Get stance
         stance = None
-        if 'stance' in includes:
-            from src.models.database import StanceRepository
-            from src.api.schemas.common import StanceData, StanceProbabilities
+        if article_data.get('stance_label'):
+            # Basic stance from article query (always included)
+            if 'stance' in includes:
+                # Full stance data with probabilities
+                from src.models.database import StanceRepository
+                from src.api.schemas.common import StanceData, StanceProbabilities
 
-            stance_data = await run_in_executor(
-                StanceRepository.get_by_article_id,
-                article_id
-            )
+                stance_data = await run_in_executor(
+                    StanceRepository.get_by_article_id,
+                    article_id
+                )
 
-            if stance_data:
+                if stance_data:
+                    stance = StanceData(
+                        label=stance_data['stance_label'],
+                        score=float(stance_data['stance_score']),
+                        probabilities=StanceProbabilities(
+                            support=float(stance_data['prob_positive']),
+                            neutral=float(stance_data['prob_neutral']),
+                            oppose=float(stance_data['prob_negative'])
+                        )
+                    )
+            else:
+                # Simple stance data without detailed probabilities (default 0.33 for unknown)
+                from src.api.schemas.common import StanceData, StanceProbabilities
+
                 stance = StanceData(
-                    label=stance_data['stance_label'],
-                    score=float(stance_data['stance_score']),
+                    label=article_data['stance_label'],
+                    score=0.0,  # Unknown without full data
                     probabilities=StanceProbabilities(
-                        support=float(stance_data['prob_positive']),
-                        neutral=float(stance_data['prob_neutral']),
-                        oppose=float(stance_data['prob_negative'])
+                        support=0.33,
+                        neutral=0.33,
+                        oppose=0.33
                     )
                 )
 
