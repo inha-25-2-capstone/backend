@@ -87,7 +87,7 @@ def _fetch_press_articles(
         result = cur.fetchone()
         total = result['total'] if result else 0
 
-        # Fetch articles
+        # Fetch articles with stance and similarity
         query = f"""
             SELECT
                 a.article_id,
@@ -95,9 +95,19 @@ def _fetch_press_articles(
                 a.published_at,
                 a.img_url,
                 p.press_id,
-                p.press_name
+                p.press_name,
+                sa.stance_label,
+                tam.similarity_score
             FROM article a
             JOIN press p ON a.press_id = p.press_id
+            LEFT JOIN stance_analysis sa ON a.article_id = sa.article_id
+            LEFT JOIN LATERAL (
+                SELECT similarity_score
+                FROM topic_article_mapping
+                WHERE article_id = a.article_id
+                ORDER BY similarity_score DESC
+                LIMIT 1
+            ) tam ON true
             WHERE a.press_id = %s
             ORDER BY a.published_at {sort_order}
             LIMIT %s OFFSET %s
@@ -242,8 +252,8 @@ async def get_press_articles(
                     ),
                     published_at=article['published_at'],
                     image_url=article['img_url'],
-                    stance=None,  # TODO: when stance model ready
-                    similarity_score=None,
+                    stance=article.get('stance_label'),
+                    similarity_score=float(article['similarity_score']) if article.get('similarity_score') else None,
                 )
             )
 

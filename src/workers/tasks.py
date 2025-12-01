@@ -323,6 +323,19 @@ def bertopic_clustering_task(self, news_date_str: str = None, limit: int = None)
                     topic_rank = topic.get('topic_rank')  # Get rank (1-10 or None)
                     cluster_score = topic.get('cluster_score')  # Get cluster score
 
+                    # Get main article stance from database
+                    main_stance = None
+                    main_stance_score = None
+                    if main_article_id:
+                        cursor.execute(
+                            "SELECT stance_label, stance_score FROM stance_analysis WHERE article_id = %s",
+                            (main_article_id,)
+                        )
+                        stance_result = cursor.fetchone()
+                        if stance_result:
+                            main_stance = stance_result[0]
+                            main_stance_score = float(stance_result[1])
+
                     # DEBUG: Check raw values from HF Spaces
                     logger.info(f"RAW HF SPACES DATA - Topic {topic['topic_id']}: article_count={topic['article_count']}, cluster_score={cluster_score}, len(article_ids)={len(topic['article_ids'])}")
 
@@ -364,13 +377,15 @@ def bertopic_clustering_task(self, news_date_str: str = None, limit: int = None)
                         """
                         INSERT INTO topic (
                             topic_date, topic_title, main_article_id, article_count,
-                            topic_rank, cluster_score, centroid_embedding, keywords, created_at
+                            topic_rank, cluster_score, centroid_embedding, keywords,
+                            main_stance, main_stance_score, created_at
                         )
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
                         RETURNING topic_id
                         """,
                         (result_date, topic_title, main_article_id, article_count,
-                         topic_rank, cluster_score, centroid_str, keywords_json)
+                         topic_rank, cluster_score, centroid_str, keywords_json,
+                         main_stance, main_stance_score)
                     )
 
                     db_topic_id = cursor.fetchone()[0]

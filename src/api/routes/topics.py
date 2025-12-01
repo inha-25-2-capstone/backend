@@ -49,7 +49,7 @@ def _fetch_topics_list(
         result = cur.fetchone()
         total = result['total'] if result else 0
 
-        # Fetch topics
+        # Fetch topics with main article stance
         cur.execute(
             """
             SELECT
@@ -61,9 +61,11 @@ def _fetch_topics_list(
                 t.topic_date,
                 t.main_article_id,
                 a.title as main_article_title,
-                a.img_url as main_article_img_url
+                a.img_url as main_article_img_url,
+                sa.stance_label as main_article_stance
             FROM topic t
             LEFT JOIN article a ON t.main_article_id = a.article_id
+            LEFT JOIN stance_analysis sa ON a.article_id = sa.article_id
             WHERE t.topic_date = %s AND t.is_active = TRUE
             ORDER BY t.topic_rank ASC NULLS LAST, t.cluster_score DESC
             LIMIT %s OFFSET %s
@@ -115,9 +117,11 @@ def _fetch_topic_detail(topic_id: int, includes: set) -> Dict[str, Any]:
                     a.published_at,
                     a.author,
                     p.press_id,
-                    p.press_name
+                    p.press_name,
+                    sa.stance_label
                 FROM article a
                 JOIN press p ON a.press_id = p.press_id
+                LEFT JOIN stance_analysis sa ON a.article_id = sa.article_id
                 WHERE a.article_id = %s
                 """,
                 (topic['main_article_id'],)
@@ -155,7 +159,7 @@ def _fetch_topic_articles(
         result = cur.fetchone()
         total = result['total'] if result else 0
 
-        # Fetch articles
+        # Fetch articles with stance
         query = f"""
             SELECT
                 a.article_id,
@@ -164,10 +168,12 @@ def _fetch_topic_articles(
                 a.img_url,
                 p.press_id,
                 p.press_name,
-                tam.similarity_score
+                tam.similarity_score,
+                sa.stance_label
             FROM topic_article_mapping tam
             JOIN article a ON tam.article_id = a.article_id
             JOIN press p ON a.press_id = p.press_id
+            LEFT JOIN stance_analysis sa ON a.article_id = sa.article_id
             WHERE tam.topic_id = %s
             ORDER BY {order_by}
             LIMIT %s OFFSET %s
@@ -246,7 +252,7 @@ async def get_topics(
                     id=topic['main_article_id'],
                     title=topic['main_article_title'],
                     image_url=topic['main_article_img_url'],
-                    stance=None,  # TODO: when stance model ready
+                    stance=topic.get('main_article_stance'),
                 )
 
             # Stance distribution (if include requested)
@@ -421,6 +427,20 @@ async def get_topic_detail(
         if 'main_article' in includes and topic_data.get('main_article_data'):
             article_data = topic_data['main_article_data']
             from src.api.schemas import ArticleDetail, TopicBrief
+            from src.api.schemas.common import StanceData, StanceProbabilities
+
+            # Get stance data
+            stance = None
+            if article_data.get('stance_label'):
+                stance = StanceData(
+                    label=article_data['stance_label'],
+                    score=0.0,  # Unknown without full data
+                    probabilities=StanceProbabilities(
+                        support=0.33,
+                        neutral=0.33,
+                        oppose=0.33
+                    )
+                )
 
             main_article = ArticleDetail(
                 id=article_data['article_id'],
@@ -439,7 +459,7 @@ async def get_topic_detail(
                     id=topic_data['topic_id'],
                     name=topic_data['topic_title']
                 ),
-                stance=None,  # TODO: when stance model ready
+                stance=stance,
             )
 
         # Stance distribution (if include requested)
@@ -572,7 +592,7 @@ async def get_topic_articles(
                     ),
                     published_at=article['published_at'],
                     image_url=article['img_url'],
-                    stance=None,  # TODO: when stance model ready
+                    stance=article.get('stance_label'),
                     similarity_score=float(article['similarity_score']) if article['similarity_score'] else None,
                 )
             )
