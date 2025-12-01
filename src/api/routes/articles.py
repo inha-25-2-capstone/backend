@@ -51,9 +51,11 @@ def _fetch_articles_list(
                 a.published_at,
                 a.img_url,
                 p.press_id,
-                p.press_name
+                p.press_name,
+                sa.stance_label
             FROM article a
             JOIN press p ON a.press_id = p.press_id
+            LEFT JOIN stance_analysis sa ON a.article_id = sa.article_id
             WHERE {where_clause}
             ORDER BY {order_by}
             LIMIT %s OFFSET %s
@@ -211,7 +213,7 @@ async def get_articles(
                     ),
                     published_at=article['published_at'],
                     image_url=article['img_url'],
-                    stance=None,  # TODO: when stance model ready
+                    stance=article.get('stance_label'),  # Now fetched from DB
                     similarity_score=None,
                 )
             )
@@ -286,8 +288,24 @@ async def get_article_detail(
         # Get stance (if include requested)
         stance = None
         if 'stance' in includes:
-            # TODO: Query stance_analysis table when model is ready
-            pass
+            from src.models.database import StanceRepository
+            from src.api.schemas.common import StanceData, StanceProbabilities
+
+            stance_data = await run_in_executor(
+                StanceRepository.get_by_article_id,
+                article_id
+            )
+
+            if stance_data:
+                stance = StanceData(
+                    label=stance_data['stance_label'],
+                    score=float(stance_data['stance_score']),
+                    probabilities=StanceProbabilities(
+                        support=float(stance_data['prob_positive']),
+                        neutral=float(stance_data['prob_neutral']),
+                        oppose=float(stance_data['prob_negative'])
+                    )
+                )
 
         return ArticleDetail(
             id=article_data['article_id'],

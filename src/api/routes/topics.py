@@ -252,9 +252,28 @@ async def get_topics(
             # Stance distribution (if include requested)
             stance_dist = None
             if 'stance_distribution' in includes:
-                # TODO: Calculate from stance_analysis table when model is ready
-                # For now, return None
-                pass
+                from src.api.schemas.common import StanceDistribution
+
+                # Count stance distribution for this topic
+                cur.execute(
+                    """
+                    SELECT
+                        sa.stance_label,
+                        COUNT(*) as count
+                    FROM topic_article_mapping tam
+                    JOIN stance_analysis sa ON tam.article_id = sa.article_id
+                    WHERE tam.topic_id = %s
+                    GROUP BY sa.stance_label
+                    """,
+                    (topic['topic_id'],)
+                )
+                stance_counts = {row['stance_label']: row['count'] for row in cur.fetchall()}
+
+                stance_dist = StanceDistribution(
+                    support=stance_counts.get('support', 0),
+                    neutral=stance_counts.get('neutral', 0),
+                    oppose=stance_counts.get('oppose', 0)
+                )
 
             topic_list.append(
                 TopicSummary(
@@ -426,8 +445,29 @@ async def get_topic_detail(
         # Stance distribution (if include requested)
         stance_dist = None
         if 'stance_distribution' in includes:
-            # TODO: Calculate from stance_analysis table when model is ready
-            pass
+            from src.api.schemas.common import StanceDistribution
+
+            # Count stance distribution for this topic
+            with get_db_cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT
+                        sa.stance_label,
+                        COUNT(*) as count
+                    FROM topic_article_mapping tam
+                    JOIN stance_analysis sa ON tam.article_id = sa.article_id
+                    WHERE tam.topic_id = %s
+                    GROUP BY sa.stance_label
+                    """,
+                    (topic_id,)
+                )
+                stance_counts = {row['stance_label']: row['count'] for row in cur.fetchall()}
+
+                stance_dist = StanceDistribution(
+                    support=stance_counts.get('support', 0),
+                    neutral=stance_counts.get('neutral', 0),
+                    oppose=stance_counts.get('oppose', 0)
+                )
 
         # Keywords (if include requested)
         keywords = []

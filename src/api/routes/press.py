@@ -41,6 +41,24 @@ def _fetch_all_press(sort_order: str) -> List[Dict[str, Any]]:
         return cur.fetchall()
 
 
+def _fetch_press_stance_distribution(press_id: str) -> Dict[str, int]:
+    """Synchronous function to fetch stance distribution for a press."""
+    with get_db_cursor() as cur:
+        cur.execute(
+            """
+            SELECT
+                sa.stance_label,
+                COUNT(*) as count
+            FROM article a
+            JOIN stance_analysis sa ON a.article_id = sa.article_id
+            WHERE a.press_id = %s
+            GROUP BY sa.stance_label
+            """,
+            (press_id,)
+        )
+        return {row['stance_label']: row['count'] for row in cur.fetchall()}
+
+
 def _fetch_press_articles(
     press_id: str,
     sort_order: str,
@@ -127,8 +145,18 @@ async def get_all_press(
             # Get stance distribution (if include requested)
             stance_dist = None
             if 'statistics' in includes:
-                # TODO: Calculate from stance_analysis table when model is ready
-                pass
+                from src.api.schemas.common import StanceDistribution
+
+                stance_counts = await run_in_executor(
+                    _fetch_press_stance_distribution,
+                    press['press_id']
+                )
+
+                stance_dist = StanceDistribution(
+                    support=stance_counts.get('support', 0),
+                    neutral=stance_counts.get('neutral', 0),
+                    oppose=stance_counts.get('oppose', 0)
+                )
 
             result.append(
                 PressDetail(
