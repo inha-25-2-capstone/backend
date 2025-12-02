@@ -317,16 +317,31 @@ def bertopic_clustering_task(self, news_date_str: str = None, limit: int = None)
 
                     topic_title = topic['topic_title']
                     article_count = topic['article_count']
-                    main_article_id = topic['article_ids'][0] if topic['article_ids'] else None
                     centroid = topic.get('centroid')  # Get centroid embedding
                     similarity_scores = topic.get('similarity_scores', {})  # Get similarity scores dict
                     topic_rank = topic.get('topic_rank')  # Get rank (1-10 or None)
                     cluster_score = topic.get('cluster_score')  # Get cluster score
 
+                    # Select main article based on highest similarity score
+                    main_article_id = None
+                    if topic['article_ids'] and similarity_scores:
+                        # Find article with highest similarity
+                        max_similarity = -1
+                        for article_id in topic['article_ids']:
+                            # similarity_scores keys are strings
+                            similarity = similarity_scores.get(str(article_id), 0)
+                            if similarity > max_similarity:
+                                max_similarity = similarity
+                                main_article_id = article_id
+                    elif topic['article_ids']:
+                        # Fallback: use first article if no similarity scores
+                        main_article_id = topic['article_ids'][0]
+
                     # Get main article stance from database
                     main_stance = None
                     main_stance_score = None
                     if main_article_id:
+                        logger.info(f"Topic {topic['topic_id']}: Selected main_article_id={main_article_id} (highest similarity)")
                         cursor.execute(
                             "SELECT stance_label, stance_score FROM stance_analysis WHERE article_id = %s",
                             (main_article_id,)
@@ -335,6 +350,9 @@ def bertopic_clustering_task(self, news_date_str: str = None, limit: int = None)
                         if stance_result:
                             main_stance = stance_result[0]
                             main_stance_score = float(stance_result[1])
+                            logger.info(f"Topic {topic['topic_id']}: Main article stance={main_stance}, score={main_stance_score:.4f}")
+                        else:
+                            logger.warning(f"Topic {topic['topic_id']}: No stance found for main_article_id={main_article_id}")
 
                     # DEBUG: Check raw values from HF Spaces
                     logger.info(f"RAW HF SPACES DATA - Topic {topic['topic_id']}: article_count={topic['article_count']}, cluster_score={cluster_score}, len(article_ids)={len(topic['article_ids'])}")
