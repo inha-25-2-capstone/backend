@@ -77,6 +77,25 @@ def _fetch_topics_list(
         return total, topics
 
 
+def _fetch_stance_distribution(topic_id: int) -> Dict[str, int]:
+    """Synchronous function to fetch stance distribution for a topic."""
+    with get_db_cursor() as cur:
+        cur.execute(
+            """
+            SELECT
+                sa.stance_label,
+                COUNT(*) as count
+            FROM topic_article_mapping tam
+            JOIN stance_analysis sa ON tam.article_id = sa.article_id
+            WHERE tam.topic_id = %s
+            GROUP BY sa.stance_label
+            """,
+            (topic_id,)
+        )
+        stance_counts = {row['stance_label']: row['count'] for row in cur.fetchall()}
+        return stance_counts
+
+
 def _fetch_topic_detail(topic_id: int, includes: set) -> Dict[str, Any]:
     """Synchronous function to fetch topic detail."""
     with get_db_cursor() as cur:
@@ -118,7 +137,11 @@ def _fetch_topic_detail(topic_id: int, includes: set) -> Dict[str, Any]:
                     a.author,
                     p.press_id,
                     p.press_name,
-                    sa.stance_label
+                    sa.stance_label,
+                    sa.stance_score,
+                    sa.support_prob,
+                    sa.neutral_prob,
+                    sa.oppose_prob
                 FROM article a
                 JOIN press p ON a.press_id = p.press_id
                 LEFT JOIN stance_analysis sa ON a.article_id = sa.article_id
@@ -258,22 +281,11 @@ async def get_topics(
             # Stance distribution (if include requested)
             stance_dist = None
             if 'stance_distribution' in includes:
-                from src.api.schemas.common import StanceDistribution
-
-                # Count stance distribution for this topic
-                cur.execute(
-                    """
-                    SELECT
-                        sa.stance_label,
-                        COUNT(*) as count
-                    FROM topic_article_mapping tam
-                    JOIN stance_analysis sa ON tam.article_id = sa.article_id
-                    WHERE tam.topic_id = %s
-                    GROUP BY sa.stance_label
-                    """,
-                    (topic['topic_id'],)
+                # Fetch stance distribution in executor
+                stance_counts = await run_in_executor(
+                    _fetch_stance_distribution,
+                    topic['topic_id']
                 )
-                stance_counts = {row['stance_label']: row['count'] for row in cur.fetchall()}
 
                 stance_dist = StanceDistribution(
                     support=stance_counts.get('support', 0),
@@ -496,11 +508,11 @@ async def get_topic_detail(
             if article_data.get('stance_label'):
                 stance = StanceData(
                     label=article_data['stance_label'],
-                    score=0.0,  # Unknown without full data
+                    score=float(article_data['stance_score']) if article_data.get('stance_score') else 0.0,
                     probabilities=StanceProbabilities(
-                        support=0.33,
-                        neutral=0.33,
-                        oppose=0.33
+                        support=float(article_data['support_prob']) if article_data.get('support_prob') else 0.0,
+                        neutral=float(article_data['neutral_prob']) if article_data.get('neutral_prob') else 0.0,
+                        oppose=float(article_data['oppose_prob']) if article_data.get('oppose_prob') else 0.0
                     )
                 )
 
@@ -529,27 +541,17 @@ async def get_topic_detail(
         if 'stance_distribution' in includes:
             from src.api.schemas.common import StanceDistribution
 
-            # Count stance distribution for this topic
-            with get_db_cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT
-                        sa.stance_label,
-                        COUNT(*) as count
-                    FROM topic_article_mapping tam
-                    JOIN stance_analysis sa ON tam.article_id = sa.article_id
-                    WHERE tam.topic_id = %s
-                    GROUP BY sa.stance_label
-                    """,
-                    (topic_id,)
-                )
-                stance_counts = {row['stance_label']: row['count'] for row in cur.fetchall()}
+            # Fetch stance distribution in executor
+            stance_counts = await run_in_executor(
+                _fetch_stance_distribution,
+                topic_id
+            )
 
-                stance_dist = StanceDistribution(
-                    support=stance_counts.get('support', 0),
-                    neutral=stance_counts.get('neutral', 0),
-                    oppose=stance_counts.get('oppose', 0)
-                )
+            stance_dist = StanceDistribution(
+                support=stance_counts.get('support', 0),
+                neutral=stance_counts.get('neutral', 0),
+                oppose=stance_counts.get('oppose', 0)
+            )
 
         # Keywords (if include requested)
         keywords = []
