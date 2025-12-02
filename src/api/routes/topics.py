@@ -503,44 +503,49 @@ async def get_topic_detail(
             from src.api.schemas import ArticleDetail, TopicBrief
             from src.api.schemas.common import StanceData, StanceProbabilities
 
-            # Get stance data
-            stance = None
-            if article_data.get('stance_label'):
-                # Safely convert to float (handle None values)
-                stance_score = article_data.get('stance_score')
-                support_prob = article_data.get('support_prob')
-                neutral_prob = article_data.get('neutral_prob')
-                oppose_prob = article_data.get('oppose_prob')
+            try:
+                # Get stance data
+                stance = None
+                if article_data.get('stance_label'):
+                    # Safely convert to float (handle None values)
+                    stance_score = article_data.get('stance_score')
+                    support_prob = article_data.get('support_prob')
+                    neutral_prob = article_data.get('neutral_prob')
+                    oppose_prob = article_data.get('oppose_prob')
 
-                stance = StanceData(
-                    label=article_data['stance_label'],
-                    score=float(stance_score) if stance_score is not None else 0.0,
-                    probabilities=StanceProbabilities(
-                        support=float(support_prob) if support_prob is not None else 0.0,
-                        neutral=float(neutral_prob) if neutral_prob is not None else 0.0,
-                        oppose=float(oppose_prob) if oppose_prob is not None else 0.0
+                    stance = StanceData(
+                        label=article_data['stance_label'],
+                        score=float(stance_score) if stance_score is not None else 0.0,
+                        probabilities=StanceProbabilities(
+                            support=float(support_prob) if support_prob is not None else 0.0,
+                            neutral=float(neutral_prob) if neutral_prob is not None else 0.0,
+                            oppose=float(oppose_prob) if oppose_prob is not None else 0.0
+                        )
                     )
-                )
 
-            main_article = ArticleDetail(
-                id=article_data['article_id'],
-                title=article_data['title'],
-                content=article_data['content'],
-                summary=article_data['summary'],
-                image_url=article_data['img_url'],
-                original_url=article_data['article_url'],
-                published_at=article_data['published_at'],
-                author=article_data['author'],
-                press=PressInfo(
-                    id=article_data['press_id'],
-                    name=article_data['press_name']
-                ),
-                topic=TopicBrief(
-                    id=topic_data['topic_id'],
-                    name=topic_data['topic_title']
-                ),
-                stance=stance,
-            )
+                main_article = ArticleDetail(
+                    id=article_data['article_id'],
+                    title=article_data.get('title') or '',
+                    content=article_data.get('content') or '',
+                    summary=article_data.get('summary'),
+                    image_url=article_data.get('img_url'),
+                    original_url=article_data.get('article_url') or '',
+                    published_at=article_data['published_at'],
+                    author=article_data.get('author'),
+                    press=PressInfo(
+                        id=article_data['press_id'],
+                        name=article_data['press_name']
+                    ),
+                    topic=TopicBrief(
+                        id=topic_data['topic_id'],
+                        name=topic_data['topic_title']
+                    ),
+                    stance=stance,
+                )
+            except Exception as e:
+                logger.error(f"Error building main_article for topic {topic_id}: {e}", exc_info=True)
+                logger.error(f"Article data keys: {list(article_data.keys()) if article_data else 'None'}")
+                raise
 
         # Stance distribution (if include requested)
         stance_dist = None
@@ -572,7 +577,7 @@ async def get_topic_detail(
             article_count=topic_data['article_count'],
             topic_date=topic_data['topic_date'],
             topic_rank=topic_data['topic_rank'],
-            cluster_score=float(topic_data['cluster_score']),
+            cluster_score=float(topic_data['cluster_score']) if topic_data.get('cluster_score') is not None else 0.0,
             main_article=main_article,
             stance_distribution=stance_dist,
             keywords=keywords,
