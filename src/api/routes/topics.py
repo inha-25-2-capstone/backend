@@ -381,6 +381,68 @@ async def get_topic_visualization():
             detail="Failed to fetch visualization"
         )
 
+@router.get("/daily-keywords", response_model=DailyKeywordsResponse)
+async def get_daily_keywords(
+    date: Optional[str] = Query(None, description="News date (YYYY-MM-DD). Default: today"),
+    limit: int = Query(50, ge=10, le=100, description="Maximum number of keywords (10-100)")
+):
+    """
+    Get daily political keywords aggregated from all topics (for word cloud).
+
+    This endpoint aggregates keywords from all topics for a specific date,
+    combining their scores to produce a weighted keyword list suitable for
+    word cloud visualization.
+
+    Args:
+        date: Target date (YYYY-MM-DD). Default: today
+        limit: Maximum number of keywords to return (10-100, default: 50)
+
+    Returns:
+        DailyKeywordsResponse with keywords and weights
+
+    Example:
+        GET /api/topics/daily-keywords?date=2025-11-28&limit=50
+    """
+    try:
+        # Parse date
+        if date:
+            try:
+                target_date = datetime.strptime(date, "%Y-%m-%d").date()
+            except ValueError:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid date format. Use YYYY-MM-DD"
+                )
+        else:
+            target_date = datetime.now().date()
+
+        # Fetch keywords from DB
+        total_topics, keyword_freq = await run_in_executor(
+            _fetch_daily_keywords,
+            target_date,
+            limit
+        )
+
+        # Build response
+        keywords = [
+            KeywordItem(text=kw, weight=round(freq, 2))
+            for kw, freq in keyword_freq.items()
+        ]
+
+        return DailyKeywordsResponse(
+            date=str(target_date),
+            total_topics=total_topics,
+            keywords=keywords
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching daily keywords: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch daily keywords"
+        )
 
 @router.get(
     "/{topic_id}",
@@ -672,67 +734,4 @@ def _fetch_daily_keywords(target_date: date, limit: int) -> Tuple[int, Dict[str,
 
         return total_topics, result_dict
 
-
-@router.get("/daily-keywords", response_model=DailyKeywordsResponse)
-async def get_daily_keywords(
-    date: Optional[str] = Query(None, description="News date (YYYY-MM-DD). Default: today"),
-    limit: int = Query(50, ge=10, le=100, description="Maximum number of keywords (10-100)")
-):
-    """
-    Get daily political keywords aggregated from all topics (for word cloud).
-
-    This endpoint aggregates keywords from all topics for a specific date,
-    combining their scores to produce a weighted keyword list suitable for
-    word cloud visualization.
-
-    Args:
-        date: Target date (YYYY-MM-DD). Default: today
-        limit: Maximum number of keywords to return (10-100, default: 50)
-
-    Returns:
-        DailyKeywordsResponse with keywords and weights
-
-    Example:
-        GET /api/topics/daily-keywords?date=2025-11-28&limit=50
-    """
-    try:
-        # Parse date
-        if date:
-            try:
-                target_date = datetime.strptime(date, "%Y-%m-%d").date()
-            except ValueError:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Invalid date format. Use YYYY-MM-DD"
-                )
-        else:
-            target_date = datetime.now().date()
-
-        # Fetch keywords from DB
-        total_topics, keyword_freq = await run_in_executor(
-            _fetch_daily_keywords,
-            target_date,
-            limit
-        )
-
-        # Build response
-        keywords = [
-            KeywordItem(text=kw, weight=round(freq, 2))
-            for kw, freq in keyword_freq.items()
-        ]
-
-        return DailyKeywordsResponse(
-            date=str(target_date),
-            total_topics=total_topics,
-            keywords=keywords
-        )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error fetching daily keywords: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to fetch daily keywords"
-        )
 
