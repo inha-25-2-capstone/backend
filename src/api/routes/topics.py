@@ -139,9 +139,9 @@ def _fetch_topic_detail(topic_id: int, includes: set) -> Dict[str, Any]:
                     p.press_name,
                     sa.stance_label,
                     sa.stance_score,
-                    sa.support_prob,
-                    sa.neutral_prob,
-                    sa.oppose_prob
+                    sa.prob_positive,
+                    sa.prob_neutral,
+                    sa.prob_negative
                 FROM article a
                 JOIN press p ON a.press_id = p.press_id
                 LEFT JOIN stance_analysis sa ON a.article_id = sa.article_id
@@ -509,17 +509,17 @@ async def get_topic_detail(
                 if article_data.get('stance_label'):
                     # Safely convert to float (handle None values)
                     stance_score = article_data.get('stance_score')
-                    support_prob = article_data.get('support_prob')
-                    neutral_prob = article_data.get('neutral_prob')
-                    oppose_prob = article_data.get('oppose_prob')
+                    prob_positive = article_data.get('prob_positive')
+                    prob_neutral = article_data.get('prob_neutral')
+                    prob_negative = article_data.get('prob_negative')
 
                     stance = StanceData(
                         label=article_data['stance_label'],
                         score=float(stance_score) if stance_score is not None else 0.0,
                         probabilities=StanceProbabilities(
-                            support=float(support_prob) if support_prob is not None else 0.0,
-                            neutral=float(neutral_prob) if neutral_prob is not None else 0.0,
-                            oppose=float(oppose_prob) if oppose_prob is not None else 0.0
+                            support=float(prob_positive) if prob_positive is not None else 0.0,
+                            neutral=float(prob_neutral) if prob_neutral is not None else 0.0,
+                            oppose=float(prob_negative) if prob_negative is not None else 0.0
                         )
                     )
 
