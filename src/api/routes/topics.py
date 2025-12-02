@@ -506,13 +506,19 @@ async def get_topic_detail(
             # Get stance data
             stance = None
             if article_data.get('stance_label'):
+                # Safely convert to float (handle None values)
+                stance_score = article_data.get('stance_score')
+                support_prob = article_data.get('support_prob')
+                neutral_prob = article_data.get('neutral_prob')
+                oppose_prob = article_data.get('oppose_prob')
+
                 stance = StanceData(
                     label=article_data['stance_label'],
-                    score=float(article_data['stance_score']) if article_data.get('stance_score') else 0.0,
+                    score=float(stance_score) if stance_score is not None else 0.0,
                     probabilities=StanceProbabilities(
-                        support=float(article_data['support_prob']) if article_data.get('support_prob') else 0.0,
-                        neutral=float(article_data['neutral_prob']) if article_data.get('neutral_prob') else 0.0,
-                        oppose=float(article_data['oppose_prob']) if article_data.get('oppose_prob') else 0.0
+                        support=float(support_prob) if support_prob is not None else 0.0,
+                        neutral=float(neutral_prob) if neutral_prob is not None else 0.0,
+                        oppose=float(oppose_prob) if oppose_prob is not None else 0.0
                     )
                 )
 
