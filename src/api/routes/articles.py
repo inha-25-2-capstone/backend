@@ -124,6 +124,72 @@ def _fetch_article_detail(article_id: int, includes: set) -> Dict[str, Any]:
         return result
 
 
+def _fetch_related_articles(
+    article_id: int,
+    stance_filter: Optional[str] = None,
+    limit: int = 10
+) -> List[Dict[str, Any]]:
+    """
+    Synchronous function to fetch related articles from the same topic.
+
+    Args:
+        article_id: The article ID to find related articles for
+        stance_filter: Optional stance filter ('all', 'support', 'neutral', 'oppose')
+        limit: Maximum number of related articles to return (default: 10)
+
+    Returns:
+        List of related articles with similarity scores
+    """
+    with get_db_cursor() as cur:
+        # First, get the topic ID for this article
+        cur.execute(
+            """
+            SELECT topic_id
+            FROM topic_article_mapping
+            WHERE article_id = %s
+            ORDER BY similarity_score DESC
+            LIMIT 1
+            """,
+            (article_id,)
+        )
+        topic_result = cur.fetchone()
+
+        if not topic_result:
+            return []
+
+        topic_id = topic_result['topic_id']
+
+        # Build query based on stance filter
+        where_clause = "tam.topic_id = %s AND tam.article_id != %s"
+        params = [topic_id, article_id]
+
+        if stance_filter and stance_filter != 'all':
+            where_clause += " AND sa.stance_label = %s"
+            params.append(stance_filter)
+
+        # Fetch related articles sorted by similarity
+        query = f"""
+            SELECT
+                a.article_id,
+                a.title,
+                p.press_id,
+                p.press_name,
+                sa.stance_label,
+                tam.similarity_score
+            FROM topic_article_mapping tam
+            JOIN article a ON tam.article_id = a.article_id
+            JOIN press p ON a.press_id = p.press_id
+            LEFT JOIN stance_analysis sa ON a.article_id = sa.article_id
+            WHERE {where_clause}
+            ORDER BY tam.similarity_score DESC
+            LIMIT %s
+        """
+        params.append(limit)
+
+        cur.execute(query, params)
+        return cur.fetchall()
+
+
 @router.get(
     "",
     response_model=PaginatedResponse[ArticleSummary],
@@ -277,6 +343,16 @@ async def get_article_detail(
         None,
         description="Include related data: stance,topic,related_articles"
     ),
+    stance_filter: Optional[str] = Query(
+        'all',
+        description="Filter related articles by stance: all,support,neutral,oppose"
+    ),
+    related_limit: int = Query(
+        10,
+        ge=1,
+        le=50,
+        description="Maximum number of related articles to return (1-50)"
+    ),
 ):
     """
     Get detailed information about a specific article.
@@ -284,9 +360,11 @@ async def get_article_detail(
     Args:
         article_id: Article ID
         include: Comma-separated list of related data to include
+        stance_filter: Filter for related articles by stance (all, support, neutral, oppose)
+        related_limit: Maximum number of related articles to return
 
     Returns:
-        Detailed article information
+        Detailed article information with optional related articles
     """
     try:
         includes = set(include.split(',')) if include else set()
@@ -351,6 +429,38 @@ async def get_article_detail(
                     )
                 )
 
+        # Get related articles (if requested)
+        related_articles = None
+        if 'related_articles' in includes:
+            from src.api.schemas import RelatedArticle
+
+            # Validate stance_filter
+            valid_stances = ['all', 'support', 'neutral', 'oppose']
+            if stance_filter not in valid_stances:
+                stance_filter = 'all'
+
+            related_articles_data = await run_in_executor(
+                _fetch_related_articles,
+                article_id,
+                stance_filter if stance_filter != 'all' else None,
+                related_limit
+            )
+
+            related_articles = []
+            for rel_article in related_articles_data:
+                related_articles.append(
+                    RelatedArticle(
+                        id=rel_article['article_id'],
+                        title=rel_article['title'],
+                        press=PressInfo(
+                            id=rel_article['press_id'],
+                            name=rel_article['press_name']
+                        ),
+                        stance=rel_article.get('stance_label'),
+                        similarity=float(rel_article['similarity_score']) if rel_article.get('similarity_score') else 0.0
+                    )
+                )
+
         return ArticleDetail(
             id=article_data['article_id'],
             title=article_data['title'],
@@ -366,6 +476,7 @@ async def get_article_detail(
             ),
             topic=topic,
             stance=stance,
+            related_articles=related_articles,
         )
 
     except HTTPException:

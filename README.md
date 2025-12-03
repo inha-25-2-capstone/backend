@@ -5,12 +5,13 @@ Backend service for Korean political news aggregation and analysis system.
 ## 🚀 Features
 
 - **News Scraping**: Automated scraping from 6 major Korean news sources (1시간 주기) ⭐
-- **AI Processing**: Summarization + 768-dim embedding (Title+Summary) via HF Spaces ⭐
+- **AI Processing**: Summarization + 768-dim embedding (Title+Summary) + Stance Analysis via HF Spaces ⭐
 - **BERTopic Clustering**: HF Spaces sklearn clustering with pre-computed embeddings ⭐
 - **Real Cosine Similarity**: Article-topic similarity calculation (0.33-0.93 range) ⭐
 - **Topic Centroids**: Computed in HF Spaces, stored in DB for ranking ⭐
 - **Topic Visualization**: DataMapPlot API (HF Spaces) with Korean font support ⭐
 - **Daily Keywords**: c-TF-IDF based keyword extraction for word cloud (Top 10 per topic) ⭐
+- **Stance API**: Full stance integration with filtering and probabilities ⭐ NEW!
 - **1시간 파이프라인**: Scraping → AI Processing → BERTopic (Celery Chain) ⭐
 - **FastAPI Endpoints**: Topics, Articles, Press, Visualization, Daily Keywords APIs ⭐
 - **Database**: PostgreSQL with pgvector extension for similarity search
@@ -66,9 +67,14 @@ Backend service for Korean political news aggregation and analysis system.
      - HF Spaces: **Calculate real cosine similarity** (article ↔ centroid) ⭐
      - Backend: Save centroid_embedding, similarity_scores, and keywords to DB ⭐
 
+3. **Stance Analysis** (Celery Task) → 옹호/중립/비판 classification ✅
+   - HF Spaces: Stance model (support/neutral/oppose)
+   - Stores probabilities: prob_positive, prob_neutral, prob_negative
+   - Main article stance saved to topic table
+
 ### TODO
-3. **Stance Analysis** (Celery Task) → Topic-based 옹호/중립/비판 classification
-4. **API Serving** → FastAPI endpoints for frontend
+4. **Recommendations** → Top 3 articles per stance per topic
+5. **API Serving** → All endpoints operational ✅
 
 ## 🛠️ Setup
 
@@ -169,9 +175,9 @@ backend/
 
 1. **press** - News organizations (6 sources)
 2. **article** - Full content + summary + embedding (768-dim from Title+Summary) ⭐
-3. **topic** - Daily topics from BERTopic clustering + centroid_embedding ⭐
+3. **topic** - Daily topics from BERTopic clustering + centroid_embedding + main_stance ⭐
 4. **topic_article_mapping** - Article-to-topic assignments with real similarity scores (0.33-0.93) ⭐
-5. **stance_analysis** - 옹호/중립/비판 classification (TODO)
+5. **stance_analysis** - 옹호/중립/비판 classification (prob_positive, prob_neutral, prob_negative) ⭐ ACTIVE!
 6. **recommended_article** - Top 3 per stance (TODO)
 
 ### Key Features
@@ -318,14 +324,15 @@ git push origin main
 - **Redis**: Task queue and caching
   - Plan: Free (25MB, 50 connections)
 
-## 📊 Current Status (2025-11-18)
+## 📊 Current Status (2025-12-03)
 
 ### ✅ Production Deployment Complete
 
 - **Deployed on Render**: All services running (API, Worker, Cron, PostgreSQL, Redis)
 - **Optimizations Applied**: Scraper retry logic, Celery concurrency control, Redis pool limit
 - **1시간 Pipeline**: Automated hourly news collection and processing
-- **API Endpoints**: Health, Topics, Articles, Press, Visualization (DataMapPlot)
+- **API Endpoints**: Health, Topics, Articles, Press, Visualization (DataMapPlot), Daily Keywords
+- **Stance API**: Full integration with filtering and real probabilities ⭐ NEW!
 
 ### 📈 Recent Verification
 
@@ -369,14 +376,23 @@ git push origin main
 
 ### ✅ Phase 4: FastAPI Endpoints - COMPLETED ⭐
 - `GET /health` - Health check
-- `GET /api/topics` - Topic list (Top 7 for main page)
-- `GET /api/topics/{topic_id}` - Topic detail
+- `GET /api/topics` - Topic list (Top 7 for main page, with stance_distribution)
+- `GET /api/topics/{topic_id}` - Topic detail (with main_article stance)
 - `GET /api/topics/{topic_id}/articles` - Articles by topic (with stance filter)
 - `GET /api/topics/visualization` - BERTopic DataMapPlot visualization (PNG) ⭐
-- `GET /api/articles` - All articles (with filters)
-- `GET /api/articles/{article_id}` - Article detail
+- `GET /api/topics/daily-keywords` - Daily keywords for word cloud ⭐
+- `GET /api/articles` - All articles (with stance/has_stance filters) ⭐
+- `GET /api/articles/{article_id}` - Article detail (with stance probabilities) ⭐
 - `GET /api/press` - Press list
-- `GET /api/press/{press_id}/articles` - Articles by press
+- `GET /api/press/{press_id}/articles` - Articles by press (with stance) ⭐
+
+### ✅ Phase 5: Stance API Integration - COMPLETED ⭐ NEW!
+- **Stance filtering**: `?stance=support|neutral|oppose`, `?has_stance=true|false`
+- **Real probabilities**: prob_positive/neutral/negative from DB (not 0.33 defaults)
+- **Main article stance**: Highest similarity article selected, stance stored in topic
+- **Stance distribution**: Aggregated per topic (support/neutral/oppose counts)
+- **NULL-safe handling**: All stance fields handle NULL values properly
+- **Similarity scores**: Included in all article list responses
 
 **Visualization API Features**:
 - Korean font support (NanumGothic)
@@ -391,10 +407,9 @@ git push origin main
 
 ### 📋 TODO (Next Priority)
 
-- ⏭️ Phase 5: Stance Analysis (waiting for ML model)
 - ⏭️ **Phase 6: Recommendation Engine (HIGH PRIORITY)**
   - `GET /api/topics/{topic_id}/recommendations` - Recommended articles (top 3 per stance)
-  - Implement recommendation algorithm using similarity scores
+  - Implement recommendation algorithm using similarity scores and stance data
 - ⏭️ Frontend-Backend Integration
 
 ## 🧪 Testing

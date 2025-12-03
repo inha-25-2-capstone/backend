@@ -74,6 +74,10 @@ class ArticleDetail(BaseModel):
         None,
         description="Stance analysis (available when model is ready)"
     )
+    related_articles: Optional[List["RelatedArticle"]] = Field(
+        None,
+        description="Related articles from the same topic"
+    )
 
     class Config:
         from_attributes = True
