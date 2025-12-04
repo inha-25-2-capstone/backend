@@ -121,7 +121,7 @@ def _fetch_press_articles(
         return True, total, articles
 
 
-def _fetch_press_stance_distribution(
+def _fetch_press_topic_stance_distribution(
     news_date,
     topic_limit: int
 ) -> Dict[str, Any]:
@@ -403,7 +403,7 @@ async def get_press_stance_distribution(
 
         # Run blocking DB query in executor (pass date object, not string)
         data = await run_in_executor(
-            _fetch_press_stance_distribution,
+            _fetch_press_topic_stance_distribution,
             news_date,
             limit
         )
