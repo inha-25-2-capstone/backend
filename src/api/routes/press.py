@@ -136,7 +136,7 @@ def _fetch_press_stance_distribution(
             """
             SELECT topic_id, topic_name
             FROM topic
-            WHERE topic_date = %s
+            WHERE DATE(topic_date) = %s
             AND topic_rank IS NOT NULL
             ORDER BY topic_rank ASC
             LIMIT %s
