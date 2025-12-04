@@ -122,11 +122,15 @@ def _fetch_press_articles(
 
 
 def _fetch_press_stance_distribution(
-    news_date: str,
+    news_date,
     topic_limit: int
 ) -> Dict[str, Any]:
     """
     Synchronous function to fetch press stance distribution across topics.
+
+    Args:
+        news_date: date object or string (YYYY-MM-DD)
+        topic_limit: Maximum number of topics
 
     Returns press-topic-stance data for building the distribution.
     """
@@ -136,7 +140,7 @@ def _fetch_press_stance_distribution(
             """
             SELECT topic_id, topic_name
             FROM topic
-            WHERE DATE(topic_date) = %s
+            WHERE topic_date = %s
             AND topic_rank IS NOT NULL
             ORDER BY topic_rank ASC
             LIMIT %s
@@ -397,10 +401,10 @@ async def get_press_stance_distribution(
 
         news_date_str = news_date.strftime("%Y-%m-%d")
 
-        # Run blocking DB query in executor
+        # Run blocking DB query in executor (pass date object, not string)
         data = await run_in_executor(
             _fetch_press_stance_distribution,
-            news_date_str,
+            news_date,
             limit
         )
 
