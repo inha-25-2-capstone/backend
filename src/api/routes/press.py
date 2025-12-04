@@ -138,7 +138,7 @@ def _fetch_press_stance_distribution(
         # Get top topics for the given date
         cur.execute(
             """
-            SELECT topic_id, topic_name
+            SELECT topic_id, topic_title
             FROM topic
             WHERE topic_date = %s
             AND topic_rank IS NOT NULL
@@ -158,7 +158,7 @@ def _fetch_press_stance_distribution(
             }
 
         topic_ids = [t['topic_id'] for t in topics]
-        topic_names = {t['topic_id']: t['topic_name'] for t in topics}
+        topic_names = {t['topic_id']: t['topic_title'] for t in topics}
 
         # Get all press
         cur.execute("SELECT press_id, press_name FROM press ORDER BY press_name")
@@ -454,7 +454,7 @@ async def get_press_stance_distribution(
             if press_id in press_topic_stance:
                 for topic in topics:
                     topic_id = topic['topic_id']
-                    topic_name = topic['topic_name']
+                    topic_name = topic['topic_title']
 
                     if topic_id in press_topic_stance[press_id]:
                         distribution = press_topic_stance[press_id][topic_id]
