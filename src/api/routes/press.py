@@ -14,6 +14,9 @@ from src.api.schemas import (
     PaginationMeta,
     StanceDistribution,
     StanceType,
+    PressStanceDistributionResponse,
+    PressStanceInfo,
+    TopicStanceInfo,
 )
 from src.api.utils import run_in_executor
 from src.models.database import get_db_cursor
@@ -116,6 +119,70 @@ def _fetch_press_articles(
         articles = cur.fetchall()
 
         return True, total, articles
+
+
+def _fetch_press_stance_distribution(
+    news_date: str,
+    topic_limit: int
+) -> List[Dict[str, Any]]:
+    """
+    Synchronous function to fetch press stance distribution across topics.
+
+    Returns press-topic-stance data for building the distribution.
+    """
+    with get_db_cursor() as cur:
+        # Get top topics for the given date
+        cur.execute(
+            """
+            SELECT topic_id, topic_name
+            FROM topic
+            WHERE topic_date = %s
+            AND topic_rank IS NOT NULL
+            ORDER BY topic_rank ASC
+            LIMIT %s
+            """,
+            (news_date, topic_limit)
+        )
+        topics = cur.fetchall()
+
+        if not topics:
+            return []
+
+        topic_ids = [t['topic_id'] for t in topics]
+        topic_names = {t['topic_id']: t['topic_name'] for t in topics}
+
+        # Get all press
+        cur.execute("SELECT press_id, press_name FROM press ORDER BY press_name")
+        press_list = cur.fetchall()
+
+        # Get stance distribution for each press-topic combination
+        cur.execute(
+            """
+            SELECT
+                a.press_id,
+                tam.topic_id,
+                sa.stance_label,
+                COUNT(*) as count
+            FROM article a
+            JOIN topic_article_mapping tam ON a.article_id = tam.article_id
+            JOIN stance_analysis sa ON a.article_id = sa.article_id
+            WHERE tam.topic_id = ANY(%s)
+            GROUP BY a.press_id, tam.topic_id, sa.stance_label
+            ORDER BY a.press_id, tam.topic_id, sa.stance_label
+            """,
+            (topic_ids,)
+        )
+        stance_data = cur.fetchall()
+
+        # Build result structure
+        result = {
+            'topics': topics,
+            'press_list': press_list,
+            'stance_data': stance_data,
+            'topic_names': topic_names
+        }
+
+        return result
 
 
 @router.get(
@@ -274,4 +341,161 @@ async def get_press_articles(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to fetch press articles"
+        )
+
+
+@router.get(
+    "/stance-distribution",
+    response_model=PressStanceDistributionResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get press stance distribution across topics",
+    description="Get stance distribution for each press organization across major topics",
+)
+async def get_press_stance_distribution(
+    date: Optional[str] = Query(None, description="News date (YYYY-MM-DD), default: today"),
+    limit: int = Query(10, ge=1, le=20, description="Max number of topics to analyze"),
+):
+    """
+    Get stance distribution for each press organization across major topics.
+
+    Shows which stance (support/neutral/oppose) each press organization uses most
+    for each major topic of the day.
+
+    Args:
+        date: News date (YYYY-MM-DD), defaults to today
+        limit: Maximum number of topics to analyze (1-20, default: 10)
+
+    Returns:
+        Press stance distribution across topics
+    """
+    try:
+        from datetime import datetime, timezone, timedelta
+
+        # Parse date or use today
+        if date:
+            try:
+                news_date = datetime.strptime(date, "%Y-%m-%d").date()
+            except ValueError:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid date format. Use YYYY-MM-DD"
+                )
+        else:
+            # Use today's date in KST
+            kst = timezone(timedelta(hours=9))
+            now_kst = datetime.now(kst)
+            # If before 5 AM, use previous day
+            if now_kst.hour < 5:
+                news_date = (now_kst - timedelta(days=1)).date()
+            else:
+                news_date = now_kst.date()
+
+        news_date_str = news_date.strftime("%Y-%m-%d")
+
+        # Run blocking DB query in executor
+        data = await run_in_executor(
+            _fetch_press_stance_distribution,
+            news_date_str,
+            limit
+        )
+
+        if not data:
+            # No topics found for this date
+            return PressStanceDistributionResponse(
+                date=news_date_str,
+                total_topics=0,
+                press_list=[]
+            )
+
+        # Build response structure
+        topics = data['topics']
+        press_list = data['press_list']
+        stance_data = data['stance_data']
+        topic_names = data['topic_names']
+
+        # Organize stance data by press and topic
+        # press_id -> topic_id -> stance_label -> count
+        press_topic_stance = {}
+        for row in stance_data:
+            press_id = row['press_id']
+            topic_id = row['topic_id']
+            stance_label = row['stance_label']
+            count = row['count']
+
+            if press_id not in press_topic_stance:
+                press_topic_stance[press_id] = {}
+            if topic_id not in press_topic_stance[press_id]:
+                press_topic_stance[press_id][topic_id] = {
+                    'support': 0,
+                    'neutral': 0,
+                    'oppose': 0
+                }
+
+            press_topic_stance[press_id][topic_id][stance_label] = count
+
+        # Build final response
+        press_response_list = []
+        for press in press_list:
+            press_id = press['press_id']
+            press_name = press['press_name']
+
+            # Get stance info for each topic
+            topic_stances = []
+            if press_id in press_topic_stance:
+                for topic in topics:
+                    topic_id = topic['topic_id']
+                    topic_name = topic['topic_name']
+
+                    if topic_id in press_topic_stance[press_id]:
+                        distribution = press_topic_stance[press_id][topic_id]
+
+                        # Determine dominant stance
+                        max_count = max(distribution.values())
+                        if max_count == 0:
+                            continue  # Skip if no articles
+
+                        # Find stance with max count (prefer support > neutral > oppose in case of tie)
+                        if distribution['support'] == max_count:
+                            dominant = 'support'
+                        elif distribution['neutral'] == max_count:
+                            dominant = 'neutral'
+                        else:
+                            dominant = 'oppose'
+
+                        topic_stances.append(
+                            TopicStanceInfo(
+                                topic_id=topic_id,
+                                topic_name=topic_name,
+                                dominant_stance=dominant,
+                                distribution=StanceDistribution(
+                                    support=distribution['support'],
+                                    neutral=distribution['neutral'],
+                                    oppose=distribution['oppose']
+                                )
+                            )
+                        )
+
+            # Only add press if they have at least one topic
+            if topic_stances:
+                press_response_list.append(
+                    PressStanceInfo(
+                        press_id=press_id,
+                        press_name=press_name,
+                        topic_stances=topic_stances
+                    )
+                )
+
+        return PressStanceDistributionResponse(
+            date=news_date_str,
+            total_topics=len(topics),
+            press_list=press_response_list
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching press stance distribution: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch press stance distribution"
         )

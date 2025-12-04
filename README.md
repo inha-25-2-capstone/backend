@@ -5,7 +5,7 @@ Backend service for Korean political news aggregation and analysis system.
 ## 🚀 Features
 
 - **News Scraping**: Automated scraping from 6 major Korean news sources (1시간 주기) ⭐
-- **AI Processing**: Summarization + 768-dim embedding (Title+Summary) + Stance Analysis via HF Spaces ⭐
+- **AI Processing**: Improved summarization (512 tokens, anti-repetition) + 768-dim embedding (Title+Summary) + Stance Analysis via HF Spaces ⭐
 - **BERTopic Clustering**: HF Spaces sklearn clustering with pre-computed embeddings ⭐
 - **Real Cosine Similarity**: Article-topic similarity calculation (0.33-0.93 range) ⭐
 - **Topic Centroids**: Computed in HF Spaces, stored in DB for ranking ⭐

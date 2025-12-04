@@ -237,3 +237,38 @@ class DailyKeywordsResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# ========================================
+# Press Stance Distribution
+# ========================================
+
+class TopicStanceInfo(BaseModel):
+    """Topic stance information for a press."""
+    topic_id: int = Field(description="Topic ID")
+    topic_name: str = Field(description="Topic name")
+    dominant_stance: StanceType = Field(description="Most common stance for this topic")
+    distribution: StanceDistribution = Field(description="Stance distribution counts")
+
+    class Config:
+        from_attributes = True
+
+
+class PressStanceInfo(BaseModel):
+    """Press stance distribution across topics."""
+    press_id: str = Field(description="Press ID")
+    press_name: str = Field(description="Press name")
+    topic_stances: List[TopicStanceInfo] = Field(description="Stance distribution per topic")
+
+    class Config:
+        from_attributes = True
+
+
+class PressStanceDistributionResponse(BaseModel):
+    """Press stance distribution response."""
+    date: str = Field(description="News date (YYYY-MM-DD)")
+    total_topics: int = Field(ge=0, description="Number of topics analyzed")
+    press_list: List[PressStanceInfo] = Field(description="Stance distribution by press")
+
+    class Config:
+        from_attributes = True
