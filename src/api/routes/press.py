@@ -124,7 +124,7 @@ def _fetch_press_articles(
 def _fetch_press_stance_distribution(
     news_date: str,
     topic_limit: int
-) -> List[Dict[str, Any]]:
+) -> Dict[str, Any]:
     """
     Synchronous function to fetch press stance distribution across topics.
 
@@ -146,7 +146,12 @@ def _fetch_press_stance_distribution(
         topics = cur.fetchall()
 
         if not topics:
-            return []
+            return {
+                'topics': [],
+                'press_list': [],
+                'stance_data': [],
+                'topic_names': {}
+            }
 
         topic_ids = [t['topic_id'] for t in topics]
         topic_names = {t['topic_id']: t['topic_name'] for t in topics}
@@ -399,7 +404,8 @@ async def get_press_stance_distribution(
             limit
         )
 
-        if not data:
+        # Check if we have topics
+        if not data or not data.get('topics'):
             # No topics found for this date
             return PressStanceDistributionResponse(
                 date=news_date_str,
