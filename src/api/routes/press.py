@@ -164,14 +164,15 @@ def _fetch_press_topic_stance_distribution(
         cur.execute("SELECT press_id, press_name FROM press ORDER BY press_name")
         press_list = cur.fetchall()
 
-        # Get stance distribution for each press-topic combination
+        # Get stance distribution for each press-topic combination with average stance score
         cur.execute(
             """
             SELECT
                 a.press_id,
                 tam.topic_id,
                 sa.stance_label,
-                COUNT(*) as count
+                COUNT(*) as count,
+                AVG(ABS(sa.stance_score)) as avg_abs_score
             FROM article a
             JOIN topic_article_mapping tam ON a.article_id = tam.article_id
             JOIN stance_analysis sa ON a.article_id = sa.article_id
@@ -424,24 +425,28 @@ async def get_press_stance_distribution(
         topic_names = data['topic_names']
 
         # Organize stance data by press and topic
-        # press_id -> topic_id -> stance_label -> count
+        # press_id -> topic_id -> stance_label -> {count, avg_abs_score}
         press_topic_stance = {}
         for row in stance_data:
             press_id = row['press_id']
             topic_id = row['topic_id']
             stance_label = row['stance_label']
             count = row['count']
+            avg_abs_score = float(row['avg_abs_score']) if row['avg_abs_score'] else 0.0
 
             if press_id not in press_topic_stance:
                 press_topic_stance[press_id] = {}
             if topic_id not in press_topic_stance[press_id]:
                 press_topic_stance[press_id][topic_id] = {
-                    'support': 0,
-                    'neutral': 0,
-                    'oppose': 0
+                    'support': {'count': 0, 'score': 0.0},
+                    'neutral': {'count': 0, 'score': 0.0},
+                    'oppose': {'count': 0, 'score': 0.0}
                 }
 
-            press_topic_stance[press_id][topic_id][stance_label] = count
+            press_topic_stance[press_id][topic_id][stance_label] = {
+                'count': count,
+                'score': avg_abs_score
+            }
 
         # Build final response
         press_response_list = []
@@ -459,18 +464,33 @@ async def get_press_stance_distribution(
                     if topic_id in press_topic_stance[press_id]:
                         distribution = press_topic_stance[press_id][topic_id]
 
-                        # Determine dominant stance
-                        max_count = max(distribution.values())
-                        if max_count == 0:
-                            continue  # Skip if no articles
+                        # Get counts for distribution response
+                        support_count = distribution['support']['count']
+                        neutral_count = distribution['neutral']['count']
+                        oppose_count = distribution['oppose']['count']
 
-                        # Find stance with max count (prefer support > neutral > oppose in case of tie)
-                        if distribution['support'] == max_count:
-                            dominant = 'support'
-                        elif distribution['neutral'] == max_count:
-                            dominant = 'neutral'
+                        # Skip if no articles
+                        if support_count + neutral_count + oppose_count == 0:
+                            continue
+
+                        # Determine dominant stance
+                        # 1st priority: highest count
+                        max_count = max(support_count, neutral_count, oppose_count)
+
+                        # Get stances with max count
+                        candidates = []
+                        if support_count == max_count:
+                            candidates.append(('support', distribution['support']['score']))
+                        if neutral_count == max_count:
+                            candidates.append(('neutral', distribution['neutral']['score']))
+                        if oppose_count == max_count:
+                            candidates.append(('oppose', distribution['oppose']['score']))
+
+                        # If tie, choose stance with highest average absolute stance_score
+                        if len(candidates) > 1:
+                            dominant = max(candidates, key=lambda x: x[1])[0]
                         else:
-                            dominant = 'oppose'
+                            dominant = candidates[0][0]
 
                         topic_stances.append(
                             TopicStanceInfo(
@@ -478,9 +498,9 @@ async def get_press_stance_distribution(
                                 topic_name=topic_name,
                                 dominant_stance=dominant,
                                 distribution=StanceDistribution(
-                                    support=distribution['support'],
-                                    neutral=distribution['neutral'],
-                                    oppose=distribution['oppose']
+                                    support=support_count,
+                                    neutral=neutral_count,
+                                    oppose=oppose_count
                                 )
                             )
                         )
