@@ -156,6 +156,7 @@ def _fetch_topic_detail(topic_id: int, includes: set) -> Dict[str, Any]:
 
 def _fetch_topic_articles(
     topic_id: int,
+    stance: Optional[StanceType],
     order_by: str,
     limit: int,
     offset: int
@@ -170,15 +171,24 @@ def _fetch_topic_articles(
         if not cur.fetchone():
             return False, 0, []
 
+        # Build WHERE clause for stance filtering
+        where_clause = "WHERE tam.topic_id = %s"
+        params_count = [topic_id]
+        params_articles = [topic_id]
+
+        if stance:
+            where_clause += " AND sa.stance_label = %s"
+            params_count.append(stance)
+            params_articles.append(stance)
+
         # Count total articles
-        cur.execute(
-            """
+        count_query = f"""
             SELECT COUNT(*) as total
             FROM topic_article_mapping tam
-            WHERE tam.topic_id = %s
-            """,
-            (topic_id,)
-        )
+            LEFT JOIN stance_analysis sa ON tam.article_id = sa.article_id
+            {where_clause}
+        """
+        cur.execute(count_query, params_count)
         result = cur.fetchone()
         total = result['total'] if result else 0
 
@@ -197,11 +207,12 @@ def _fetch_topic_articles(
             JOIN article a ON tam.article_id = a.article_id
             JOIN press p ON a.press_id = p.press_id
             LEFT JOIN stance_analysis sa ON a.article_id = sa.article_id
-            WHERE tam.topic_id = %s
+            {where_clause}
             ORDER BY {order_by}
             LIMIT %s OFFSET %s
         """
-        cur.execute(query, (topic_id, limit, offset))
+        params_articles.extend([limit, offset])
+        cur.execute(query, params_articles)
         articles = cur.fetchall()
 
         return True, total, articles
@@ -641,6 +652,7 @@ async def get_topic_articles(
         exists, total, articles = await run_in_executor(
             _fetch_topic_articles,
             topic_id,
+            stance,
             order_by,
             limit,
             offset
